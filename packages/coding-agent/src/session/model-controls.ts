@@ -14,6 +14,7 @@ import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { logger } from "@oh-my-pi/pi-utils";
 import { classifyDifficulty } from "../auto-thinking/classifier";
 import type { ModelRegistry } from "../config/model-registry";
+import { resolveFamilyRoleRouting } from "../config/model-family-routing";
 import {
 	filterAvailableModelsByEnabledPatterns,
 	formatModelStringWithRouting,
@@ -102,6 +103,7 @@ export class ModelControls {
 			);
 		}
 		this.#applyThinkingLevelToAgent(this.#thinkingLevel);
+		this.#applyFamilyRoleRouting(this.#model);
 	}
 
 	get #model(): Model | undefined {
@@ -245,6 +247,7 @@ export class ModelControls {
 				),
 			);
 		}
+		if (role === "default") this.#applyFamilyRoleRouting(targetModel);
 		this.#host.settings.getStorage()?.recordModelUsage(`${targetModel.provider}/${targetModel.id}`);
 
 		// Re-apply thinking for the newly selected model. Prefer the model's
@@ -252,6 +255,12 @@ export class ModelControls {
 		this.#reapplyThinkingLevel(targetModel.thinking?.defaultLevel);
 		await this.#host.syncAfterModelChange(previousEditMode);
 		return { switched: true };
+	}
+
+	/** Apply only transient overrides; persisted role choices remain untouched. */
+	#applyFamilyRoleRouting(model: Model | undefined): void {
+		if (!model || !this.#host.settings.get("modelRoleFamilyRouting")) return;
+		this.#host.settings.overrideModelRoles(resolveFamilyRoleRouting(model, this.#host.modelRegistry.getAvailable()));
 	}
 
 	/**

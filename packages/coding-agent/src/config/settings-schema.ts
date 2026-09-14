@@ -692,6 +692,18 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	modelRoleFamilyRouting: {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "models",
+			group: "Model Roles",
+			label: "Family-aware role routing",
+			description:
+				"When the default model changes, assign built-in roles to suitable models from that provider. Local providers use the selected model for every built-in role.",
+		},
+	},
+
 	modelRoles: { type: "record", default: EMPTY_STRING_RECORD },
 
 	modelTags: { type: "record", default: EMPTY_MODEL_TAGS_RECORD },
