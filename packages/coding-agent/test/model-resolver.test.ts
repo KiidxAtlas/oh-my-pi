@@ -905,6 +905,39 @@ describe("resolveModelRoleValue", () => {
 		expect(result.warning).toBeUndefined();
 	});
 
+	test("resolves multi-hop aliases with outer thinking taking precedence over inner selectors", () => {
+		const settings = Settings.isolated({
+			modelRoles: {
+				smol: "@slow:low",
+				slow: "@plan:medium",
+				plan: "anthropic/claude-sonnet-4-5:low",
+			},
+		});
+
+		const result = resolveModelRoleValue("@smol:high", allModels, { settings });
+
+		expect(result.model?.provider).toBe("anthropic");
+		expect(result.model?.id).toBe("claude-sonnet-4-5");
+		expect(result.thinkingLevel).toBe(Effort.High);
+		expect(result.explicitThinkingLevel).toBe(true);
+	});
+
+	test("discards cyclic alias branches without poisoning later fallback paths", () => {
+		const settings = Settings.isolated({
+			modelRoles: {
+				smol: "@slow",
+				slow: "@smol",
+				plan: "@slow,anthropic/claude-sonnet-4-5:low",
+			},
+		});
+
+		expect(resolveModelRoleValue("@smol", allModels, { settings }).model).toBeUndefined();
+		const result = resolveModelRoleValue("@smol,@plan", allModels, { settings });
+		expect(result.model?.provider).toBe("anthropic");
+		expect(result.model?.id).toBe("claude-sonnet-4-5");
+		expect(result.thinkingLevel).toBe(Effort.Low);
+	});
+
 	test("splits direct comma fallback chains before parsing thinking selectors", () => {
 		const result = resolveModelRoleValue("anthropic/claude-sonnet-4-5:off,openai/gpt-4o:off", allModels);
 

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Model } from "@oh-my-pi/pi-ai";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import {
 	buildDefaultModelRolePreset,
 	deleteModelRolePreset,
@@ -15,7 +16,18 @@ import {
 } from "../src/config/model-role-presets";
 
 function model(provider: string, id: string, baseUrl: string = "https://api.example.test/v1"): Model {
-	return { provider, id, baseUrl } as Model;
+	return buildModel({
+		provider,
+		id,
+		name: id,
+		baseUrl,
+		api: "openai-completions",
+		reasoning: false,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 128_000,
+		maxTokens: 4096,
+	});
 }
 
 const opus = model("anthropic", "claude-opus-5");
@@ -23,9 +35,9 @@ const cheapRoles = { smol: "anthropic/claude-haiku-4-5" };
 const qualityRoles = { plan: "anthropic/claude-opus-5", task: "anthropic/claude-opus-5" };
 
 describe("built-in model role presets", () => {
-	test("uses curated priority order within the selected provider without comparing generations", () => {
-		const selected = { ...opus, identity: { revision: "9.0.0" } } as Model;
-		const haiku = { ...model("anthropic", "claude-haiku-4-5"), identity: { revision: "4.5.0" } } as Model;
+	test("uses resolved catalog priority within the selected provider", () => {
+		const selected = opus;
+		const haiku = model("anthropic", "claude-haiku-4-5");
 		const preset = buildDefaultModelRolePreset(selected, [
 			selected,
 			model("google", "gemini-3.8-flash"),
@@ -44,6 +56,22 @@ describe("built-in model role presets", () => {
 			advisor: "anthropic/claude-fable-5-1",
 			vision: "anthropic/claude-opus-5",
 		});
+	});
+
+	test("selects by resolved priority facts rather than recognized model names", () => {
+		const selected = model("custom", "primary");
+		const preferred: Model = { ...model("custom", "preferred"), rolePresetPriority: { smol: 0 } };
+		const runnerUp: Model = { ...model("custom", "runner-up"), rolePresetPriority: { smol: 1 } };
+		const foreign: Model = { ...model("other", "preferred"), rolePresetPriority: { smol: 0, slow: 0 } };
+		const preset = buildDefaultModelRolePreset(selected, [
+			runnerUp,
+			model("custom", "claude-haiku-4-5"),
+			foreign,
+			preferred,
+			selected,
+		]);
+		expect(preset.smol).toBe("custom/preferred");
+		expect(preset.slow).toBe("custom/primary");
 	});
 
 	test("falls back to the selected model rather than fuzzy retired or foreign-provider matches", () => {

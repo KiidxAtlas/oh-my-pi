@@ -1,6 +1,5 @@
 import type { Model } from "@oh-my-pi/pi-ai";
 import { isRecord } from "@oh-my-pi/pi-utils";
-import MODEL_PRIO from "../priority.json" with { type: "json" };
 
 /** Roles replaced when a model preset is applied. The selected model remains the default role. */
 export const MODEL_PRESET_ROLES = ["smol", "slow", "vision", "plan", "commit", "tiny", "task", "advisor"] as const;
@@ -46,25 +45,28 @@ function storedPresets(value: unknown): Record<string, unknown> | undefined {
 	return isRecord(value.presets) ? value.presets : undefined;
 }
 
-function curatedModel(selected: Model, available: readonly Model[], priority: readonly string[]): Model {
-	const candidates = available.filter(model => model.provider === selected.provider);
-	for (const pattern of priority) {
-		const normalized = pattern.toLowerCase();
-		const exact = candidates.find(model => {
-			const candidate = selector(model).toLowerCase();
-			return candidate === normalized || model.id.toLowerCase() === normalized;
-		});
-		if (exact) return exact;
+function curatedModel(selected: Model, available: readonly Model[], role: "smol" | "slow"): Model {
+	let best = selected;
+	let bestPriority = Infinity;
+	for (const candidate of available) {
+		if (candidate.provider !== selected.provider) continue;
+		const priority = candidate.rolePresetPriority?.[role];
+		if (priority === undefined) continue;
+		if (priority < bestPriority || (priority === bestPriority && candidate.id < best.id)) {
+			best = candidate;
+			bestPriority = priority;
+		}
 	}
-	return selected;
+	return best;
 }
 
-/** Same-provider exact priority.json entries only; no fuzzy or generation-based fallbacks. */
+/** Same-provider catalog-ranked choices; eligibility and priority are authored in KDL. */
 export function buildDefaultModelRolePreset(selected: Model, available: readonly Model[]): ModelRolePreset {
-	const sameModel = Object.fromEntries(MODEL_PRESET_ROLES.map(role => [role, selector(selected)])) as ModelRolePreset;
+	const selectedSelector = selector(selected);
+	const sameModel = Object.fromEntries(MODEL_PRESET_ROLES.map(role => [role, selectedSelector])) as ModelRolePreset;
 	if (isLoopbackUrl(selected.baseUrl)) return sameModel;
-	const fast = curatedModel(selected, available, MODEL_PRIO.smol);
-	const comprehensive = curatedModel(selected, available, MODEL_PRIO.slow);
+	const fast = curatedModel(selected, available, "smol");
+	const comprehensive = curatedModel(selected, available, "slow");
 	return {
 		...sameModel,
 		smol: selector(fast),

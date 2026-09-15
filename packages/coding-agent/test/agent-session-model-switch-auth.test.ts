@@ -120,6 +120,146 @@ describe("AgentSession model switch auth pre-flight", () => {
 		expect(getApiKeySpy).not.toHaveBeenCalled();
 	});
 
+	it.each(["anthropic/missing-old-slow", "anthropic/claude-sonnet-4-6"])(
+		"resolves saved forward aliases against the incoming slow role instead of %s",
+		async oldSlow => {
+			const from = modelOrThrow("claude-sonnet-4-5");
+			const to = modelOrThrow("claude-sonnet-4-6");
+			const target = `${from.provider}/${from.id}:low`;
+			const settings = Settings.isolated({
+				modelRolePresets: {
+					[`${to.provider}/${to.id}`]: { default: { smol: "@slow", slow: target } },
+				},
+			});
+			settings.setModelRole("slow", oldSlow);
+			const s = makeSession(from, undefined, settings);
+
+			await s.setModel(to, "default", { modelRolePreset: { kind: "configured-default" } });
+
+			expect(settings.getModelRole("smol")).toBe("@slow");
+			expect(settings.getModelRole("slow")).toBe(target);
+			const resolved = s.resolveRoleModelWithThinking("smol");
+			expect(resolved.model?.id).toBe(from.id);
+			expect(resolved.thinkingLevel).toBe(Effort.Low);
+		},
+	);
+
+	it("retains a forward alias chain and its thinking selectors", async () => {
+		const from = modelOrThrow("claude-sonnet-4-5");
+		const to = modelOrThrow("claude-sonnet-4-6");
+		const target = `${from.provider}/${from.id}:low`;
+		const settings = Settings.isolated({
+			modelRolePresets: {
+				[`${to.provider}/${to.id}`]: {
+					default: { smol: "@slow:high", slow: "@plan", plan: target },
+				},
+			},
+		});
+		settings.setModelRole("slow", "anthropic/missing-old-slow");
+		settings.setModelRole("plan", "anthropic/missing-old-plan");
+		const s = makeSession(from, undefined, settings);
+
+		await s.setModel(to, "default", { modelRolePreset: { kind: "configured-default" } });
+
+		expect(settings.getModelRole("smol")).toBe("@slow:high");
+		expect(settings.getModelRole("slow")).toBe("@plan");
+		expect(settings.getModelRole("plan")).toBe(target);
+		expect(s.resolveRoleModelWithThinking("smol").model?.id).toBe(from.id);
+		expect(s.resolveRoleModelWithThinking("smol").thinkingLevel).toBe(Effort.High);
+		expect(s.resolveRoleModelWithThinking("slow").thinkingLevel).toBe(Effort.Low);
+	});
+
+	it("resolves default aliases against the selected model before its role is persisted", async () => {
+		const from = modelOrThrow("claude-sonnet-4-5");
+		const to = modelOrThrow("claude-sonnet-4-6");
+		const selected = `${to.provider}/${to.id}`;
+		const settings = Settings.isolated({
+			modelRolePresets: { [selected]: { default: { smol: "@default:low" } } },
+		});
+		settings.setModelRole("default", "anthropic/missing-old-default");
+		const s = makeSession(from, undefined, settings);
+
+		await s.setModel(to, "default", { modelRolePreset: { kind: "configured-default" } });
+
+		expect(settings.getModelRole("smol")).toBe("@default:low");
+		// Project selection persists Default after the model-switch callback.
+		settings.setModelRole("default", selected);
+		expect(s.resolveRoleModelWithThinking("smol").model?.id).toBe(to.id);
+		expect(s.resolveRoleModelWithThinking("smol").thinkingLevel).toBe(Effort.Low);
+	});
+
+	it("replaces cyclic and unavailable alias targets without using partially applied fallbacks", async () => {
+		const from = modelOrThrow("claude-sonnet-4-5");
+		const to = modelOrThrow("claude-sonnet-4-6");
+		const selected = `${to.provider}/${to.id}`;
+		const settings = Settings.isolated({
+			modelRolePresets: {
+				[selected]: {
+					default: { smol: "@slow", slow: "@smol", vision: "@plan", plan: "anthropic/missing-model" },
+				},
+			},
+		});
+		for (const role of ["smol", "slow", "vision", "plan"]) {
+			settings.setModelRole(role, `${from.provider}/${from.id}`);
+		}
+		const s = makeSession(from, undefined, settings);
+
+		await s.setModel(to, "default", { modelRolePreset: { kind: "configured-default" } });
+
+		for (const role of ["smol", "slow", "vision", "plan"]) {
+			expect(settings.getModelRole(role)).toBe(selected);
+			expect(s.resolveRoleModelWithThinking(role).model?.id).toBe(to.id);
+		}
+	});
+
+	it.each([true, false])("looks up omitted alias targets with keepRolesWhenUnset=%s", async keepRolesWhenUnset => {
+		const from = modelOrThrow("claude-sonnet-4-5");
+		const to = modelOrThrow("claude-sonnet-4-6");
+		const original = `${from.provider}/${from.id}`;
+		const selected = `${to.provider}/${to.id}`;
+		const settings = Settings.isolated({
+			modelRolePresets: { keepRolesWhenUnset, [selected]: { default: { smol: "@vision" } } },
+		});
+		settings.setModelRole("vision", original);
+		const s = makeSession(from, undefined, settings);
+
+		await s.setModel(to, "default", { modelRolePreset: { kind: "configured-default" } });
+
+		expect(settings.getModelRole("vision")).toBe(keepRolesWhenUnset ? original : undefined);
+		expect(settings.getModelRole("smol")).toBe(keepRolesWhenUnset ? "@vision" : selected);
+		expect(s.resolveRoleModelWithThinking("smol").model?.id).toBe(keepRolesWhenUnset ? from.id : to.id);
+	});
+
+	it.each(["project", "global"] as const)("resolves cleared alias targets in the %s scope", async scope => {
+		const from = modelOrThrow("claude-sonnet-4-5");
+		const to = modelOrThrow("claude-sonnet-4-6");
+		const original = `${from.provider}/${from.id}`;
+		const selected = `${to.provider}/${to.id}`;
+		const settings = Settings.isolated({
+			modelRoleStorage: "project",
+			modelRolePresets: { keepRolesWhenUnset: false, [selected]: { default: { smol: "@vision" } } },
+		});
+		settings.setModelRole("vision", original);
+		settings.setProjectModelRole("vision", "anthropic/missing-project-vision");
+		const s = makeSession(from, undefined, settings);
+
+		await s.setModel(to, "default", { scope, modelRolePreset: { kind: "configured-default" } });
+
+		if (scope === "project") {
+			expect(settings.getProjectModelRole("vision")).toBeUndefined();
+			expect(settings.getGlobalModelRole("vision")).toBe(original);
+			expect(settings.getProjectModelRole("smol")).toBe("@vision");
+			expect(settings.getGlobalModelRole("smol")).toBeUndefined();
+			expect(s.resolveRoleModelWithThinking("smol").model?.id).toBe(from.id);
+		} else {
+			expect(settings.getProjectModelRole("vision")).toBe("anthropic/missing-project-vision");
+			expect(settings.getGlobalModelRole("vision")).toBeUndefined();
+			expect(settings.getProjectModelRole("smol")).toBeUndefined();
+			expect(settings.getGlobalModelRole("smol")).toBe(selected);
+			expect(s.resolveRoleModelWithThinking("smol").model?.id).toBe(to.id);
+		}
+	});
+
 	it("preserves supporting roles when built-in presets are disabled and no saved Default exists", async () => {
 		const from = modelOrThrow("claude-sonnet-4-5");
 		const to = modelOrThrow("claude-sonnet-4-6");

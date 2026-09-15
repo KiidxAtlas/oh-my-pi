@@ -1259,7 +1259,16 @@ function resolveConfiguredRolePattern(
 		return undefined;
 	}
 
-	return thinkingLevel ? resolved.map(pattern => `${pattern}:${thinkingLevel}`) : resolved;
+	return thinkingLevel
+		? resolved.map(pattern => {
+				const prefixLength = modelRoleAliasPrefixLength(pattern);
+				const base =
+					prefixLength === undefined
+						? pattern
+						: splitThinkingSuffix(pattern, prefixLength, MAX_THINKING_SUFFIX_OPTIONS).base;
+				return `${base}:${thinkingLevel}`;
+			})
+		: resolved;
 }
 
 /**
@@ -1280,10 +1289,14 @@ export function resolveConfiguredModelPatterns(
 	settings?: ModelRoleLookup,
 ): string[] {
 	const patterns = normalizeModelPatternList(value);
-	return patterns.flatMap(pattern => {
-		const resolved = resolveConfiguredRolePattern(pattern, settings);
-		return resolved ?? [];
-	});
+	const expand = (pattern: string, visited: Set<string>): string[] => {
+		const resolved = resolveConfiguredRolePattern(pattern, settings, visited);
+		if (!resolved) return [];
+		return resolved.flatMap(value =>
+			resolveExplicitModelRole(value, settings) ? expand(value, new Set(visited)) : [value],
+		);
+	};
+	return patterns.flatMap(pattern => expand(pattern, new Set()));
 }
 export interface AgentModelPatternResolutionOptions {
 	/** Highest-priority request selector, when supplied by a caller. */

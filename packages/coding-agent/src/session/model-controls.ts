@@ -332,18 +332,33 @@ export class ModelControls {
 			selection.kind !== "named" &&
 			this.#host.settings.get("modelRolePresets.applyOnSelect");
 		if (!savedPreset && !useBuiltInDefault) return;
-		const preset = savedPreset ?? buildDefaultModelRolePreset(model, available);
-		for (const role of MODEL_PRESET_ROLES) {
+		const preset: Readonly<Partial<Record<string, string>>> =
+			savedPreset ?? buildDefaultModelRolePreset(model, available);
+		const selected = formatModelStringWithRouting(model);
+		const roleLookup = {
+			getModelRole: (role: string): string | undefined => {
+				if (role === "default") return selected;
+				if (preset[role]) return preset[role];
+				// Match the persisted scope, not runtime/overlay values that may
+				// shadow it. Clearing project roles exposes the global fallback.
+				if (!keepUnsetRoles && MODEL_PRESET_ROLES.some(presetRole => presetRole === role)) {
+					return scope === "project" ? this.#host.settings.getGlobalModelRole(role) : undefined;
+				}
+				return scope === "project"
+					? (this.#host.settings.getProjectModelRole(role) ?? this.#host.settings.getGlobalModelRole(role))
+					: this.#host.settings.getGlobalModelRole(role);
+			},
+		};
+		// Resolve against the complete incoming map before writing anything:
+		// forward aliases and invalid cycles must not depend on role order.
+		const assignments = MODEL_PRESET_ROLES.map(role => {
 			const value = preset[role];
-			if (!value) {
-				if (!keepUnsetRoles) this.#setModelRole(role, undefined, scope);
-				continue;
-			}
-			const candidate = resolveModelRoleValue(value, available, { settings: this.#host.settings }).model;
-			const resolved =
-				candidate && this.#host.modelRegistry.hasConfiguredAuth(candidate)
-					? value
-					: `${model.provider}/${model.id}`;
+			if (!value) return [role, undefined] as const;
+			const candidate = resolveModelRoleValue(value, available, { settings: this.#host.settings, roleLookup }).model;
+			return [role, candidate && this.#host.modelRegistry.hasConfiguredAuth(candidate) ? value : selected] as const;
+		});
+		for (const [role, resolved] of assignments) {
+			if (resolved === undefined && keepUnsetRoles) continue;
 			this.#setModelRole(role, resolved, scope);
 		}
 	}
