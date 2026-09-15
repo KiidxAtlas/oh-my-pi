@@ -17,7 +17,6 @@ import {
 import { reset as resetCapabilities } from "../../capability";
 import { showGitOverlay } from "../../cli/git-tui";
 import {
-	extractExplicitThinkingSelector,
 	formatModelSelectorValue,
 	formatModelStringWithRouting,
 	resolveAdvisorRoleSelection,
@@ -1192,14 +1191,14 @@ export class SelectorController {
 				onApplyPreset: async (model, name, applyOptions) => {
 					const releaseDefaultMutation = await this.#acquireDefaultRoleMutation();
 					try {
-						const configuredThinking = extractExplicitThinkingSelector(
+						const currentDefault = resolveModelRoleValue(
 							this.ctx.settings.getModelRole("default"),
-							this.ctx.settings,
-							{
-								isLiteralModelId: (provider, id) =>
-									this.ctx.session.modelRegistry.find(provider, id) !== undefined,
-							},
+							this.ctx.session.getAvailableModels(),
+							{ settings: this.ctx.settings },
 						);
+						const configuredThinking = currentDefault.explicitThinkingLevel
+							? currentDefault.thinkingLevel
+							: undefined;
 						const isAuto = configuredThinking === AUTO_THINKING;
 						const concreteThinking = concreteThinkingLevel(configuredThinking);
 						const { switched } = await this.ctx.session.setModel(model, "default", {
