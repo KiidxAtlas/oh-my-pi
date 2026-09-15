@@ -922,6 +922,28 @@ describe("resolveModelRoleValue", () => {
 		expect(result.explicitThinkingLevel).toBe(true);
 	});
 
+	test("preserves a literal effort-like model suffix while applying an outer alias effort", () => {
+		const literal = buildModel({
+			id: "coding-router:low",
+			name: "Coding Router Low",
+			api: "openai-completions",
+			provider: "nanogpt",
+			baseUrl: "https://api.example.test/v1",
+			reasoning: true,
+			thinking: { mode: "effort", efforts: [Effort.Low, Effort.High] },
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128_000,
+			maxTokens: 4096,
+		});
+		const settings = Settings.isolated({ modelRoles: { smol: "nanogpt/coding-router:low" } });
+
+		const result = resolveModelRoleValue("@smol:high", [literal], { settings });
+
+		expect(result.model?.id).toBe("coding-router:low");
+		expect(result.thinkingLevel).toBe(Effort.High);
+	});
+
 	test("discards cyclic alias branches without poisoning later fallback paths", () => {
 		const settings = Settings.isolated({
 			modelRoles: {

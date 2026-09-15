@@ -259,6 +259,18 @@ describe("ModelHub", () => {
 			expect(settings.getModelRole("smol")).toBe("test/existing");
 		});
 
+		test("does not mark a preset unsaved when an unavailable assignment falls back to the selected model", () => {
+			const model = makeModel("test", "primary");
+			const settings = Settings.isolated({
+				modelRoles: { default: "test/primary", smol: "test/primary" },
+				modelRolePresets: { "test/primary": { default: { smol: "test/missing" } } },
+			});
+			const { hub } = createHub({ models: [model], scoped: true, settings });
+
+			hub.handleInput(UP); // All models → Roles.
+			expect(normalize(hub.render(220))).not.toContain("(unsaved)");
+		});
+
 		test("disabling built-ins clears the stale Default comparison and reset selection", () => {
 			const model = makeModel("test", "primary");
 			const settings = Settings.isolated({

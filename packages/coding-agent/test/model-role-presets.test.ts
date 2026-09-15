@@ -85,6 +85,26 @@ describe("built-in model role presets", () => {
 		expect(preset.tiny).toBe("anthropic/claude-opus-5");
 	});
 
+	test("preserves explicit upstream routing in selected-model fallback roles", () => {
+		const base = model("openrouter", "z-ai/glm-4.7");
+		const selected = {
+			...base,
+			compat: { ...base.compat, openRouterRouting: { only: ["fireworks"] } },
+		} as Model;
+		const preset = buildDefaultModelRolePreset(selected, [selected]);
+
+		expect(preset).toEqual({
+			smol: "openrouter/z-ai/glm-4.7@fireworks",
+			tiny: "openrouter/z-ai/glm-4.7@fireworks",
+			slow: "openrouter/z-ai/glm-4.7@fireworks",
+			task: "openrouter/z-ai/glm-4.7@fireworks",
+			commit: "openrouter/z-ai/glm-4.7@fireworks",
+			plan: "openrouter/z-ai/glm-4.7@fireworks",
+			advisor: "openrouter/z-ai/glm-4.7@fireworks",
+			vision: "openrouter/z-ai/glm-4.7@fireworks",
+		});
+	});
+
 	test.each(["http://localhost:8000/v1", "http://127.0.0.2:8000/v1", "http://[::1]:8000/v1"])(
 		"keeps all roles on a local model at %s even with same-provider curated alternatives",
 		baseUrl => {

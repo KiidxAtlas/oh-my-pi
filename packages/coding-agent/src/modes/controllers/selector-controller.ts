@@ -23,7 +23,6 @@ import {
 } from "../../config/model-resolver";
 import {
 	deleteModelRolePreset,
-	MODEL_PRESET_ROLES,
 	saveModelRolePreset,
 	saveModelRolePresetDefault,
 	setModelRolePresetDefault,
@@ -1071,54 +1070,20 @@ export class SelectorController {
 							// persist an explicit `:auto` suffix and must not mutate the current model.
 							const isAuto = thinkingLevel === AUTO_THINKING;
 							const concreteThinking = isAuto || thinkingLevel === undefined ? undefined : thinkingLevel;
-							const effectiveProvenance = this.ctx.settings.getModelRoleProvenance("default");
-							const shadowedGlobal =
-								configuredStorage === "project" &&
-								targetScope === "global" &&
-								(effectiveProvenance === "project" ||
-									effectiveProvenance === "overlay" ||
-									(effectiveProvenance === "runtime" &&
-										this.ctx.settings.isProjectModelRoleRuntimeOverrideActive("default")));
-							const shadowedProject =
-								configuredStorage === "project" &&
-								targetScope === "project" &&
-								effectiveProvenance === "overlay";
-							if (shadowedGlobal) {
-								this.ctx.settings.setModelRole(
-									"default",
-									formatModelSelectorValue(selectorValue, concreteThinking),
-								);
-								if (isAuto) {
-									this.ctx.settings.set("defaultThinkingLevel", AUTO_THINKING);
-								}
-							} else if (shadowedProject) {
-								this.ctx.settings.setProjectModelRole(
-									"default",
-									formatModelSelectorValue(selectorValue, concreteThinking),
-								);
-								if (isAuto) {
-									this.ctx.settings.set("defaultThinkingLevel", AUTO_THINKING);
-								}
-							} else {
-								const { switched } = await this.ctx.session.setModel(model, role, {
-									selector,
-									thinkingLevel: isAuto ? ThinkingLevel.Inherit : concreteThinking,
-									persist: targetScope === "global",
-									scope: targetScope,
-									modelRolePreset: { kind: "on-select" },
-								});
-								if (!switched) return;
-								if (targetScope === "project") {
-									this.ctx.settings.setProjectModelRole(
-										"default",
-										formatModelSelectorValue(selectorValue, concreteThinking),
-									);
-								}
-								if (isAuto) {
-									this.ctx.session.setThinkingLevel(AUTO_THINKING, true);
-								} else if (concreteThinking && concreteThinking !== ThinkingLevel.Inherit) {
-									this.ctx.session.setThinkingLevel(concreteThinking);
-								}
+							const { switched } = await this.ctx.session.setModel(model, role, {
+								selector,
+								thinkingLevel: isAuto ? ThinkingLevel.Inherit : concreteThinking,
+								persist: true,
+								scope: targetScope,
+								modelRolePreset: { kind: "on-select" },
+							});
+							if (isAuto) {
+								if (switched) this.ctx.session.setThinkingLevel(AUTO_THINKING, true);
+								else this.ctx.settings.set("defaultThinkingLevel", AUTO_THINKING);
+							} else if (switched && concreteThinking && concreteThinking !== ThinkingLevel.Inherit) {
+								this.ctx.session.setThinkingLevel(concreteThinking);
+							}
+							if (switched) {
 								this.ctx.statusLine.invalidate();
 								this.ctx.updateEditorBorderColor();
 							}
@@ -1273,17 +1238,16 @@ export class SelectorController {
 				onSetDefaultPreset: (model, name) => {
 					this.ctx.settings.set(
 						"modelRolePresets",
-						setModelRolePresetDefault(this.ctx.settings.get("modelRolePresets"), model, name),
+						setModelRolePresetDefault(this.ctx.settings.getGlobalModelRolePresets(), model, name),
 					);
 					this.ctx.showStatus(`${model.id} default preset: ${name ?? "Default"}`);
 				},
 				onSaveActivePreset: (model, name, automatic) => {
-					const presets = this.ctx.settings.get("modelRolePresets");
-					const roles: Record<string, string | undefined> = {};
-					for (const role of MODEL_PRESET_ROLES) {
-						const modelId = this.ctx.settings.getGlobalModelRole(role);
-						if (modelId !== undefined) roles[role] = modelId;
-					}
+					const presets = this.ctx.settings.getGlobalModelRolePresets();
+					const roles =
+						this.ctx.settings.get("modelRoleStorage") === "project"
+							? this.ctx.settings.getProjectModelRoles()
+							: this.ctx.settings.getGlobalModelRoles();
 					this.ctx.settings.set(
 						"modelRolePresets",
 						name === undefined
@@ -1297,7 +1261,7 @@ export class SelectorController {
 				onDeletePreset: (model, name) => {
 					this.ctx.settings.set(
 						"modelRolePresets",
-						deleteModelRolePreset(this.ctx.settings.get("modelRolePresets"), model, name),
+						deleteModelRolePreset(this.ctx.settings.getGlobalModelRolePresets(), model, name),
 					);
 					this.ctx.showStatus(`Deleted ${model.id} preset: ${name}`);
 				},

@@ -1169,6 +1169,7 @@ function resolveDefaultInheritedPatterns(
 	roleDefaults: string[],
 	settings: ModelRoleLookup | undefined,
 	visited: Set<string>,
+	isLiteralModelPattern: ((pattern: string) => boolean) | undefined,
 ): string[] {
 	if (!shouldInheritDefaultBeforePriority(role) || !configuredDefault) return [];
 
@@ -1194,7 +1195,7 @@ function resolveDefaultInheritedPatterns(
 		if (aliasRole) {
 			// Cross-role alias (e.g. modelRoles.default = "@slow"): resolve the
 			// concrete model patterns instead of another role alias.
-			const recursed = resolveConfiguredRolePattern(pattern, settings, new Set(visited));
+			const recursed = resolveConfiguredRolePattern(pattern, settings, new Set(visited), isLiteralModelPattern);
 			if (recursed && recursed.length > 0) {
 				resolved.push(...recursed);
 				continue;
@@ -1209,6 +1210,7 @@ function resolveConfiguredRolePattern(
 	value: string,
 	settings?: ModelRoleLookup,
 	visited: Set<string> = new Set(),
+	isLiteralModelPattern?: (pattern: string) => boolean,
 ): string[] | undefined {
 	const normalized = value.trim();
 	if (!normalized) return undefined;
@@ -1231,7 +1233,12 @@ function resolveConfiguredRolePattern(
 		configured || !configuredFallback
 			? undefined
 			: (
-					resolveConfiguredRolePattern(formatModelRoleAlias(configuredFallback), settings, new Set(visited)) ?? []
+					resolveConfiguredRolePattern(
+						formatModelRoleAlias(configuredFallback),
+						settings,
+						new Set(visited),
+						isLiteralModelPattern,
+					) ?? []
 				).flatMap(pattern => {
 					const { base, level } = splitThinkingSuffix(
 						pattern,
@@ -1250,7 +1257,14 @@ function resolveConfiguredRolePattern(
 		: fallbackPatterns
 			? fallbackPatterns
 			: isModelRole(role)
-				? resolveDefaultInheritedPatterns(role, configuredDefault, roleDefaults, settings, visited)
+				? resolveDefaultInheritedPatterns(
+						role,
+						configuredDefault,
+						roleDefaults,
+						settings,
+						visited,
+						isLiteralModelPattern,
+					)
 				: roleDefaults;
 	if (resolved.length === 0) {
 		resolved.push(...roleDefaults);
@@ -1266,8 +1280,10 @@ function resolveConfiguredRolePattern(
 					prefixLength === undefined
 						? pattern
 						: splitThinkingSuffix(pattern, prefixLength, MAX_THINKING_SUFFIX_OPTIONS).base;
-				const { base: stripped } = splitThinkingSuffix(base, -1, MAX_THINKING_SUFFIX_OPTIONS);
-				return `${stripped}:${thinkingLevel}`;
+				const resolvedBase = isLiteralModelPattern?.(base)
+					? base
+					: splitThinkingSuffix(base, -1, MAX_THINKING_SUFFIX_OPTIONS).base;
+				return `${resolvedBase}:${thinkingLevel}`;
 			})
 		: resolved;
 }
@@ -1288,10 +1304,11 @@ export function expandRoleAlias(value: string, settings?: ModelRoleLookup): stri
 export function resolveConfiguredModelPatterns(
 	value: string | string[] | undefined,
 	settings?: ModelRoleLookup,
+	options?: { isLiteralModelPattern?: (pattern: string) => boolean },
 ): string[] {
 	const patterns = normalizeModelPatternList(value);
 	const expand = (pattern: string, visited: Set<string>): string[] => {
-		const resolved = resolveConfiguredRolePattern(pattern, settings, visited);
+		const resolved = resolveConfiguredRolePattern(pattern, settings, visited, options?.isLiteralModelPattern);
 		if (!resolved) return [];
 		return resolved.flatMap(value =>
 			resolveExplicitModelRole(value, settings) ? expand(value, new Set(visited)) : [value],
@@ -1466,7 +1483,10 @@ export function resolveModelRoleValue(
 		return { model: undefined, thinkingLevel: undefined, explicitThinkingLevel: false, warning: undefined };
 	}
 
-	const effectivePatterns = resolveConfiguredModelPatterns(normalized, options?.roleLookup ?? options?.settings);
+	const literalModelPatterns = new Set(availableModels.map(formatModelString));
+	const effectivePatterns = resolveConfiguredModelPatterns(normalized, options?.roleLookup ?? options?.settings, {
+		isLiteralModelPattern: pattern => literalModelPatterns.has(pattern),
+	});
 	if (!effectivePatterns || effectivePatterns.length === 0) {
 		return { model: undefined, thinkingLevel: undefined, explicitThinkingLevel: false, warning: undefined };
 	}

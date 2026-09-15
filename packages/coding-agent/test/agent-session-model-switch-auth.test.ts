@@ -279,6 +279,29 @@ describe("AgentSession model switch auth pre-flight", () => {
 		}
 	});
 
+	it("applies auto-loaded presets to a shadowed global selection", async () => {
+		const from = modelOrThrow("claude-sonnet-4-5");
+		const to = modelOrThrow("claude-sonnet-4-6");
+		const selected = `${to.provider}/${to.id}`;
+		const settings = Settings.isolated({
+			modelRoleStorage: "project",
+			modelRolePresets: { autoLoad: true, applyOnSelect: true },
+		});
+		settings.setProjectModelRole("default", `${from.provider}/${from.id}`);
+		const s = makeSession(from, undefined, settings);
+
+		const { switched } = await s.setModel(to, "default", {
+			persist: true,
+			scope: "global",
+			modelRolePreset: { kind: "on-select" },
+		});
+
+		expect(switched).toBe(false);
+		expect(settings.getGlobalModelRole("default")).toBe(selected);
+		expect(settings.getGlobalModelRole("smol")).toBeDefined();
+		expect(settings.getProjectModelRole("smol")).toBeUndefined();
+	});
+
 	it("preserves supporting roles when built-in presets are disabled and no saved Default exists", async () => {
 		const from = modelOrThrow("claude-sonnet-4-5");
 		const to = modelOrThrow("claude-sonnet-4-6");

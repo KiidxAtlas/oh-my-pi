@@ -272,7 +272,7 @@ export class ModelControls {
 				scope,
 			);
 		}
-		if (presetSelection && (!shadowed || presetSelection.kind !== "on-select")) {
+		if (presetSelection) {
 			const shouldApply =
 				presetSelection.kind !== "on-select" ||
 				(this.#host.settings.get("modelRolePresets.autoLoad") &&

@@ -1,5 +1,6 @@
 import type { Model } from "@oh-my-pi/pi-ai";
 import { isRecord } from "@oh-my-pi/pi-utils";
+import { formatModelStringWithRouting } from "./model-resolver";
 
 /** Roles replaced when a model preset is applied. The selected model remains the default role. */
 export const MODEL_PRESET_ROLES = ["smol", "slow", "vision", "plan", "commit", "tiny", "task", "advisor"] as const;
@@ -62,20 +63,20 @@ function curatedModel(selected: Model, available: readonly Model[], role: "smol"
 
 /** Same-provider catalog-ranked choices; eligibility and priority are authored in KDL. */
 export function buildDefaultModelRolePreset(selected: Model, available: readonly Model[]): ModelRolePreset {
-	const selectedSelector = selector(selected);
+	const selectedSelector = formatModelStringWithRouting(selected);
 	const sameModel = Object.fromEntries(MODEL_PRESET_ROLES.map(role => [role, selectedSelector])) as ModelRolePreset;
 	if (isLoopbackUrl(selected.baseUrl)) return sameModel;
 	const fast = curatedModel(selected, available, "smol");
 	const comprehensive = curatedModel(selected, available, "slow");
 	return {
 		...sameModel,
-		smol: selector(fast),
-		tiny: selector(fast),
-		slow: selector(comprehensive),
-		task: selector(comprehensive),
-		commit: selector(comprehensive),
-		plan: selector(comprehensive),
-		advisor: selector(comprehensive),
+		smol: formatModelStringWithRouting(fast),
+		tiny: formatModelStringWithRouting(fast),
+		slow: formatModelStringWithRouting(comprehensive),
+		task: formatModelStringWithRouting(comprehensive),
+		commit: formatModelStringWithRouting(comprehensive),
+		plan: formatModelStringWithRouting(comprehensive),
+		advisor: formatModelStringWithRouting(comprehensive),
 	};
 }
 

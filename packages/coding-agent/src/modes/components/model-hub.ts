@@ -40,6 +40,7 @@ import {
 } from "../../config/model-role-presets";
 import {
 	formatModelSelectorValue,
+	formatModelStringWithRouting,
 	type ModelRoleLookup,
 	parseModelString,
 	splitUpstreamRouting,
@@ -696,14 +697,45 @@ export class ModelHubComponent implements Component {
 				: active?.name === undefined
 					? getModelRolePresetDefault(storedPresets, defaultModel)
 					: getModelRolePreset(storedPresets, defaultModel, active.name);
+			const presetScope = this.#settings.get("modelRoleStorage") === "project" ? "project" : "global";
+			const keepUnsetRoles = this.#settings.get("modelRolePresets.keepRolesWhenUnset");
+			const selected = formatModelStringWithRouting(defaultModel);
+			const availableForResolution = [...availableModels];
+			const roleLookup: ModelRoleLookup = {
+				getModelRole: role => {
+					if (role === "default") return selected;
+					const presetRole = MODEL_PRESET_ROLES.find(candidate => candidate === role);
+					if (presetRole && activeProfile?.[presetRole] !== undefined) return activeProfile[presetRole];
+					if (!keepUnsetRoles && presetRole) {
+						return presetScope === "project" ? this.#settings.getGlobalModelRole(role) : undefined;
+					}
+					return presetScope === "project"
+						? (this.#settings.getProjectModelRole(role) ?? this.#settings.getGlobalModelRole(role))
+						: this.#settings.getGlobalModelRole(role);
+				},
+			};
+			const appliedProfile =
+				activeProfile === undefined
+					? undefined
+					: (Object.fromEntries(
+							MODEL_PRESET_ROLES.map(role => {
+								const value = activeProfile[role];
+								if (!value) return [role, undefined];
+								const candidate = resolveModelRoleValue(value, availableForResolution, {
+									settings: this.#settings,
+									roleLookup,
+								}).model;
+								return [role, candidate ? value : selected];
+							}),
+						) as typeof activeProfile);
 			const rolesDifferFromPreset =
 				active !== undefined &&
-				(activeProfile === undefined
+				(appliedProfile === undefined
 					? MODEL_PRESET_ROLES.some(role => projectRoles[role] !== undefined)
 					: MODEL_PRESET_ROLES.some(role =>
-							activeProfile[role] === undefined && this.#settings.get("modelRolePresets.keepRolesWhenUnset")
+							appliedProfile[role] === undefined && keepUnsetRoles
 								? false
-								: projectRoles[role] !== activeProfile[role],
+								: projectRoles[role] !== appliedProfile[role],
 						));
 			this.#activePresetDirty = this.#activePresetManuallyDirty || rolesDifferFromPreset;
 			rows.push({ kind: "preset", name: undefined, model: defaultModel, isDefault: defaultName === undefined });

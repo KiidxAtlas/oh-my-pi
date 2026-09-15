@@ -1311,6 +1311,16 @@ export class Settings {
 		return modelId || undefined;
 	}
 
+	/** Get all model roles from only the global settings layer. */
+	getGlobalModelRoles(): ReadOnlyDict<string> {
+		return this.#modelRolesFromLayer(this.#global);
+	}
+
+	/** Get model-role presets from only the global settings layer. */
+	getGlobalModelRolePresets(): unknown {
+		return this.#global.modelRolePresets;
+	}
+
 	/**
 	 * Get a model role from only the current project settings layer.
 	 */
@@ -1323,14 +1333,7 @@ export class Settings {
 	 * Get all model roles from only the current project settings layer.
 	 */
 	getProjectModelRoles(): ReadOnlyDict<string> {
-		const roles = this.#modelRolesFromLayer(this.#project);
-		const normalized: Record<string, string> = {};
-		for (const role in roles) {
-			if (!Object.hasOwn(roles, role)) continue;
-			const modelId = modelRoleValueFromUnknown(roles[role]);
-			if (modelId !== undefined) normalized[role] = modelId;
-		}
-		return normalized;
+		return this.#modelRolesFromLayer(this.#project);
 	}
 
 	/**
