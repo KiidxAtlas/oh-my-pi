@@ -1320,6 +1320,20 @@ export class Settings {
 	}
 
 	/**
+	 * Get all model roles from only the current project settings layer.
+	 */
+	getProjectModelRoles(): ReadOnlyDict<string> {
+		const roles = this.#modelRolesFromLayer(this.#project);
+		const normalized: Record<string, string> = {};
+		for (const role in roles) {
+			if (!Object.hasOwn(roles, role)) continue;
+			const modelId = modelRoleValueFromUnknown(roles[role]);
+			if (modelId !== undefined) normalized[role] = modelId;
+		}
+		return normalized;
+	}
+
+	/**
 	 * Report which layer actually supplies the effective model role across
 	 * full merge precedence (runtime override → config overlay → project →
 	 * global → default). Unlike {@link getModelRoleSource}, this accounts

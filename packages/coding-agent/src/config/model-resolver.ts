@@ -1266,7 +1266,8 @@ function resolveConfiguredRolePattern(
 					prefixLength === undefined
 						? pattern
 						: splitThinkingSuffix(pattern, prefixLength, MAX_THINKING_SUFFIX_OPTIONS).base;
-				return `${base}:${thinkingLevel}`;
+				const { base: stripped } = splitThinkingSuffix(base, -1, MAX_THINKING_SUFFIX_OPTIONS);
+				return `${stripped}:${thinkingLevel}`;
 			})
 		: resolved;
 }

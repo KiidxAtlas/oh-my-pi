@@ -23,6 +23,7 @@ import {
 } from "../../config/model-resolver";
 import {
 	deleteModelRolePreset,
+	MODEL_PRESET_ROLES,
 	saveModelRolePreset,
 	saveModelRolePresetDefault,
 	setModelRolePresetDefault,
@@ -1278,7 +1279,11 @@ export class SelectorController {
 				},
 				onSaveActivePreset: (model, name, automatic) => {
 					const presets = this.ctx.settings.get("modelRolePresets");
-					const roles = this.ctx.settings.getModelRoles();
+					const roles: Record<string, string | undefined> = {};
+					for (const role of MODEL_PRESET_ROLES) {
+						const modelId = this.ctx.settings.getGlobalModelRole(role);
+						if (modelId !== undefined) roles[role] = modelId;
+					}
 					this.ctx.settings.set(
 						"modelRolePresets",
 						name === undefined
