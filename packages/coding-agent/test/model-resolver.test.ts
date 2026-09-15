@@ -148,7 +148,7 @@ const mockMaxSuffixModels: Model<Api>[] = [
 		maxTokens: 8192,
 	}),
 	buildModel({
-		id: "coding-router:low",
+		id: "NanoGPT/Coding-Router:LOW",
 		name: "NanoGPT Coding Router Low",
 		api: "openai-completions",
 		provider: "nanogpt",
@@ -572,7 +572,7 @@ describe("parseModelPattern", () => {
 
 		test("fuzzy selectors preserve literal models ending in a thinking-level suffix", () => {
 			const result = parseModelPattern("router:low", mockMaxSuffixModels);
-			expect(result.model?.id).toBe("coding-router:low");
+			expect(result.model?.id).toBe("NanoGPT/Coding-Router:LOW");
 			expect(result.thinkingLevel).toBeUndefined();
 			expect(result.explicitThinkingLevel).toBe(false);
 		});
@@ -922,27 +922,30 @@ describe("resolveModelRoleValue", () => {
 		expect(result.explicitThinkingLevel).toBe(true);
 	});
 
-	test("preserves a literal effort-like model suffix while applying an outer alias effort", () => {
-		const literal = buildModel({
-			id: "coding-router:low",
-			name: "Coding Router Low",
-			api: "openai-completions",
-			provider: "nanogpt",
-			baseUrl: "https://api.example.test/v1",
-			reasoning: true,
-			thinking: { mode: "effort", efforts: [Effort.Low, Effort.High] },
-			input: ["text"],
-			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-			contextWindow: 128_000,
-			maxTokens: 4096,
-		});
-		const settings = Settings.isolated({ modelRoles: { smol: "nanogpt/coding-router:low" } });
+	test.each(["nanogpt/NanoGPT/Coding-Router:LOW", "NanoGPT/NanoGPT/Coding-Router:LOW"])(
+		"preserves literal selector %s while applying an outer alias effort",
+		selector => {
+			const literal = buildModel({
+				id: "NanoGPT/Coding-Router:LOW",
+				name: "Coding Router Low",
+				api: "openai-completions",
+				provider: "nanogpt",
+				baseUrl: "https://api.example.test/v1",
+				reasoning: true,
+				thinking: { mode: "effort", efforts: [Effort.Low, Effort.High] },
+				input: ["text"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: 128_000,
+				maxTokens: 4096,
+			});
+			const settings = Settings.isolated({ modelRoles: { smol: selector } });
 
-		const result = resolveModelRoleValue("@smol:high", [literal], { settings });
+			const result = resolveModelRoleValue("@smol:high", [literal], { settings });
 
-		expect(result.model?.id).toBe("coding-router:low");
-		expect(result.thinkingLevel).toBe(Effort.High);
-	});
+			expect(result.model?.id).toBe("NanoGPT/Coding-Router:LOW");
+			expect(result.thinkingLevel).toBe(Effort.High);
+		},
+	);
 
 	test("discards cyclic alias branches without poisoning later fallback paths", () => {
 		const settings = Settings.isolated({

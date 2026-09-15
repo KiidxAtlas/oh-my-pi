@@ -1169,7 +1169,7 @@ function resolveDefaultInheritedPatterns(
 	roleDefaults: string[],
 	settings: ModelRoleLookup | undefined,
 	visited: Set<string>,
-	isLiteralModelPattern: ((pattern: string) => boolean) | undefined,
+	normalizeLiteralModelPattern: ((pattern: string) => string | undefined) | undefined,
 ): string[] {
 	if (!shouldInheritDefaultBeforePriority(role) || !configuredDefault) return [];
 
@@ -1195,7 +1195,12 @@ function resolveDefaultInheritedPatterns(
 		if (aliasRole) {
 			// Cross-role alias (e.g. modelRoles.default = "@slow"): resolve the
 			// concrete model patterns instead of another role alias.
-			const recursed = resolveConfiguredRolePattern(pattern, settings, new Set(visited), isLiteralModelPattern);
+			const recursed = resolveConfiguredRolePattern(
+				pattern,
+				settings,
+				new Set(visited),
+				normalizeLiteralModelPattern,
+			);
 			if (recursed && recursed.length > 0) {
 				resolved.push(...recursed);
 				continue;
@@ -1210,7 +1215,7 @@ function resolveConfiguredRolePattern(
 	value: string,
 	settings?: ModelRoleLookup,
 	visited: Set<string> = new Set(),
-	isLiteralModelPattern?: (pattern: string) => boolean,
+	normalizeLiteralModelPattern?: (pattern: string) => string | undefined,
 ): string[] | undefined {
 	const normalized = value.trim();
 	if (!normalized) return undefined;
@@ -1237,7 +1242,7 @@ function resolveConfiguredRolePattern(
 						formatModelRoleAlias(configuredFallback),
 						settings,
 						new Set(visited),
-						isLiteralModelPattern,
+						normalizeLiteralModelPattern,
 					) ?? []
 				).flatMap(pattern => {
 					const { base, level } = splitThinkingSuffix(
@@ -1263,7 +1268,7 @@ function resolveConfiguredRolePattern(
 						roleDefaults,
 						settings,
 						visited,
-						isLiteralModelPattern,
+						normalizeLiteralModelPattern,
 					)
 				: roleDefaults;
 	if (resolved.length === 0) {
@@ -1280,9 +1285,8 @@ function resolveConfiguredRolePattern(
 					prefixLength === undefined
 						? pattern
 						: splitThinkingSuffix(pattern, prefixLength, MAX_THINKING_SUFFIX_OPTIONS).base;
-				const resolvedBase = isLiteralModelPattern?.(base)
-					? base
-					: splitThinkingSuffix(base, -1, MAX_THINKING_SUFFIX_OPTIONS).base;
+				const literalPattern = normalizeLiteralModelPattern?.(base);
+				const resolvedBase = literalPattern ?? splitThinkingSuffix(base, -1, MAX_THINKING_SUFFIX_OPTIONS).base;
 				return `${resolvedBase}:${thinkingLevel}`;
 			})
 		: resolved;
@@ -1300,11 +1304,11 @@ export function expandRoleAlias(value: string, settings?: ModelRoleLookup): stri
 export function resolveConfiguredModelPatterns(
 	value: string | string[] | undefined,
 	settings?: ModelRoleLookup,
-	options?: { isLiteralModelPattern?: (pattern: string) => boolean },
+	options?: { normalizeLiteralModelPattern?: (pattern: string) => string | undefined },
 ): string[] {
 	const patterns = normalizeModelPatternList(value);
 	const expand = (pattern: string, visited: Set<string>): string[] => {
-		const resolved = resolveConfiguredRolePattern(pattern, settings, visited, options?.isLiteralModelPattern);
+		const resolved = resolveConfiguredRolePattern(pattern, settings, visited, options?.normalizeLiteralModelPattern);
 		if (!resolved) return [];
 		return resolved.flatMap(value =>
 			resolveExplicitModelRole(value, settings) ? expand(value, new Set(visited)) : [value],
@@ -1479,9 +1483,14 @@ export function resolveModelRoleValue(
 		return { model: undefined, thinkingLevel: undefined, explicitThinkingLevel: false, warning: undefined };
 	}
 
-	const literalModelPatterns = new Set(availableModels.map(formatModelString));
+	const literalModelPatterns = new Map<string, string | undefined>();
+	for (const model of availableModels) {
+		const selector = formatModelString(model);
+		const key = selector.toLowerCase();
+		literalModelPatterns.set(key, literalModelPatterns.has(key) ? undefined : selector);
+	}
 	const effectivePatterns = resolveConfiguredModelPatterns(normalized, options?.roleLookup ?? options?.settings, {
-		isLiteralModelPattern: pattern => literalModelPatterns.has(pattern),
+		normalizeLiteralModelPattern: pattern => literalModelPatterns.get(pattern.trim().toLowerCase()),
 	});
 	if (!effectivePatterns || effectivePatterns.length === 0) {
 		return { model: undefined, thinkingLevel: undefined, explicitThinkingLevel: false, warning: undefined };

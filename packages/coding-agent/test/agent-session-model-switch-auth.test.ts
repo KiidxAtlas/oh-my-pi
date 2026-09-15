@@ -302,6 +302,22 @@ describe("AgentSession model switch auth pre-flight", () => {
 		expect(settings.getProjectModelRole("smol")).toBeUndefined();
 	});
 
+	it("uses the session model scope when applying a built-in preset", async () => {
+		const from = modelOrThrow("claude-sonnet-4-5");
+		const to = modelOrThrow("claude-sonnet-4-6");
+		const selected = `${to.provider}/${to.id}`;
+		const settings = Settings.isolated({ modelRolePresets: { applyOnSelect: true } });
+		const s = makeSession(from, undefined, settings);
+		s.setScopedModels([{ model: to }]);
+
+		await s.setModel(to, "default", {
+			persist: true,
+			modelRolePreset: { kind: "built-in-default" },
+		});
+
+		expect(settings.getGlobalModelRole("smol")).toBe(selected);
+	});
+
 	it("preserves supporting roles when built-in presets are disabled and no saved Default exists", async () => {
 		const from = modelOrThrow("claude-sonnet-4-5");
 		const to = modelOrThrow("claude-sonnet-4-6");

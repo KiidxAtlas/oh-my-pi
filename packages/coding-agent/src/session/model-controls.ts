@@ -316,7 +316,8 @@ export class ModelControls {
 		keepUnsetRoles: boolean,
 		scope: "global" | "project",
 	): void {
-		const available = this.getAvailableModels();
+		const available =
+			this.#scopedModels.length > 0 ? this.#scopedModels.map(scoped => scoped.model) : this.getAvailableModels();
 		const savedPresets = this.#host.settings.get("modelRolePresets");
 		const savedPreset =
 			selection.kind === "built-in-default"
