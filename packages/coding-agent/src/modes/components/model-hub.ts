@@ -1086,11 +1086,7 @@ export class ModelHubComponent implements Component {
 	}
 
 	/** Late role edits must not auto-save into a different model or preset. */
-	#mutateRole(
-		role: string,
-		scope: ModelRoleSelectionScope | undefined,
-		mutate: () => void | Promise<void>,
-	): void {
+	#mutateRole(role: string, scope: ModelRoleSelectionScope | undefined, mutate: () => void | Promise<void>): void {
 		const commitPresetEdit = this.#notePresetRoleEdit(role, scope);
 		void Promise.resolve(mutate())
 			.then(() => {
