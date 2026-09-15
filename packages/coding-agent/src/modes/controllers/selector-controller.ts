@@ -1079,6 +1079,27 @@ export class SelectorController {
 							// persist an explicit `:auto` suffix and must not mutate the current model.
 							const isAuto = thinkingLevel === AUTO_THINKING;
 							const concreteThinking = isAuto || thinkingLevel === undefined ? undefined : thinkingLevel;
+							// A thinking-only edit re-enters this callback with the model that
+							// already owns the default role. Loading the preset again there would
+							// overwrite unsaved supporting-role edits, so auto-load is requested
+							// only when the default model actually changes.
+							const storedDefault =
+								targetScope === "project"
+									? (this.ctx.settings.getProjectModelRole("default") ??
+										this.ctx.settings.getGlobalModelRole("default"))
+									: this.ctx.settings.getGlobalModelRole("default");
+							const currentDefaultModel = resolveModelRoleValue(
+								storedDefault,
+								this.ctx.session.scopedModels.length > 0
+									? this.ctx.session.scopedModels.map(scoped => scoped.model)
+									: this.ctx.session.getAvailableModels(),
+								{ settings: this.ctx.settings },
+							).model;
+							const selectsNewDefaultModel =
+								!currentDefaultModel ||
+								currentDefaultModel.provider !== model.provider ||
+								currentDefaultModel.id !== model.id;
+							const presetSelection = selectsNewDefaultModel ? ({ kind: "on-select" } as const) : undefined;
 							const effectiveProvenance = this.ctx.settings.getModelRoleProvenance("default");
 							const shadowedGlobal =
 								configuredStorage === "project" &&
@@ -1100,13 +1121,13 @@ export class SelectorController {
 								if (shadowedGlobal) this.ctx.settings.setModelRole("default", persistedValue);
 								else this.ctx.settings.setProjectModelRole("default", persistedValue);
 								if (isAuto) this.ctx.settings.set("defaultThinkingLevel", AUTO_THINKING);
-								this.ctx.session.applyModelRolePreset(model, { kind: "on-select" }, targetScope);
+								if (presetSelection) this.ctx.session.applyModelRolePreset(model, presetSelection, targetScope);
 							} else {
 								const { switched } = await this.ctx.session.setModel(model, role, {
 									selector: selectorValue,
 									thinkingLevel: isAuto ? ThinkingLevel.Inherit : concreteThinking,
 									persist: targetScope === "global",
-									modelRolePreset: { kind: "on-select" },
+									modelRolePreset: presetSelection,
 								});
 								if (!switched) return false;
 								if (targetScope === "project") {

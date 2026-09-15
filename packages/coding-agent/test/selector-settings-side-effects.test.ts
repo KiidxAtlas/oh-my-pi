@@ -999,6 +999,94 @@ describe("selector setting side effects", () => {
 			hub.dispose();
 		}
 	});
+	it("requests preset auto-load only when the default model changes", async () => {
+		const testTheme = await getThemeByName("dark");
+		if (!testTheme) throw new Error("Failed to load dark theme for model selector test");
+		setThemeInstance(testTheme);
+
+		const currentModel = getBundledModel("openai", "gpt-5.5");
+		const targetModel = getBundledModel("openai", "gpt-5.6");
+		if (!currentModel || !targetModel) throw new Error("Expected bundled OpenAI models for selector test");
+
+		const settings = Settings.isolated({});
+		settings.setModelRole("default", `${currentModel.provider}/${currentModel.id}`);
+		// Mirror ModelControls: the persisted default moves with the assignment, so
+		// the follow-up thinking edit sees itself as the active default.
+		const setModel = vi.fn(async (_model: unknown, _role: string, options: { selector?: string }) => {
+			if (options.selector) settings.setModelRole("default", options.selector);
+			return { switched: true };
+		});
+		let statusCount = 0;
+		const modelAssigned = Promise.withResolvers<void>();
+		const thinkingAssigned = Promise.withResolvers<void>();
+		const showStatus = vi.fn((message: string) => {
+			if (!message.startsWith("Default model:")) return;
+			statusCount++;
+			if (statusCount === 1) modelAssigned.resolve();
+			if (statusCount === 2) thinkingAssigned.resolve();
+		});
+		let captured: unknown;
+		const controller = new SelectorController({
+			ui: {
+				requestRender: vi.fn(),
+				setFocus: vi.fn(),
+				showOverlay: vi.fn((component: unknown) => {
+					captured = component;
+					return { hide: vi.fn() };
+				}),
+				terminal: { rows: 40 },
+			},
+			editorContainer: { clear: vi.fn(), addChild: vi.fn(), children: [] },
+			editor: {},
+			settings,
+			session: {
+				model: currentModel,
+				modelRegistry: {
+					getAll: () => [currentModel, targetModel],
+					getAvailable: () => [currentModel, targetModel],
+					getError: () => undefined,
+					refresh: async () => {},
+					refreshProvider: async () => {},
+					getDiscoverableProviders: () => [],
+					getProviderDiscoveryState: () => undefined,
+					authStorage: { hasAuth: () => false },
+				},
+				scopedModels: [{ model: currentModel }, { model: targetModel }],
+				getContextUsage: () => undefined,
+				setModel,
+				setThinkingLevel: vi.fn(),
+				applyModelRolePreset: vi.fn(),
+			},
+			statusLine: { invalidate: vi.fn() },
+			updateEditorBorderColor: vi.fn(),
+			keybindings: { getKeys: () => [], getDisplayString: () => "" },
+			showStatus,
+			showError: vi.fn(),
+		} as unknown as InteractiveModeContext);
+
+		controller.showModelSelector();
+		const hub = captured as { handleInput(data: string): void; dispose(): void } | undefined;
+		if (!hub) throw new Error("Expected model hub overlay to be shown");
+		try {
+			hub.handleInput("\t"); // Sidebar → model list.
+			hub.handleInput("\x1b[B"); // Active default → the other model.
+			hub.handleInput("\n"); // Open its role strip.
+			hub.handleInput("\n"); // Assign DEFAULT: the default model changes.
+			await modelAssigned.promise;
+			// The status fires inside the callback; let its promise settle so the hub
+			// clears its pending-assignment gate and opens the thinking strip.
+			for (let i = 0; i < 5; i++) await Promise.resolve();
+			hub.handleInput("\x1b[B"); // Thinking strip: inherit → next level.
+			hub.handleInput("\n"); // Commit the thinking-only edit.
+			await thinkingAssigned.promise;
+
+			expect(setModel).toHaveBeenCalledTimes(2);
+			expect(setModel.mock.calls[0]?.[2]).toMatchObject({ modelRolePreset: { kind: "on-select" } });
+			expect(setModel.mock.calls[1]?.[2]).toMatchObject({ modelRolePreset: undefined });
+		} finally {
+			hub.dispose();
+		}
+	});
 
 	it("replaces malformed default retry fallback chains from the model selector action", async () => {
 		const testTheme = await getThemeByName("dark");

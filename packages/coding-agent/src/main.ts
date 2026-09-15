@@ -1378,11 +1378,12 @@ export async function buildSessionOptions(
 			? true
 			: !restoringSession && activeSettings.get("prewalk.enabled");
 	if (prewalkEnabled) {
-		const rolePattern = expandRoleAlias(
-			parsed.prewalkInto ?? DEFAULT_PREWALK_TARGET,
-			activeSettings,
-			modelRegistry.getAvailable(),
-		);
+		const prewalkTarget = parsed.prewalkInto ?? DEFAULT_PREWALK_TARGET;
+		// Alias expansion canonicalizes literal effort-like model ids against the
+		// catalog it can see, so it must re-run after a discovery refresh widens
+		// that catalog — otherwise a cold-start expansion of `@smol:high` over
+		// `custom/coding-router:low` stays rewritten to `…:high` and misses.
+		let rolePattern = expandRoleAlias(prewalkTarget, activeSettings, modelRegistry.getAvailable());
 		let resolved = resolveCliModel({ cliModel: rolePattern, modelRegistry, preferences: modelMatchPreferences });
 		// A target from a configured discovery provider is absent from the cold
 		// startup catalog. Refresh only the provider named by the selector: a
@@ -1395,6 +1396,7 @@ export async function buildSessionOptions(
 				: undefined;
 			if (discoverableProvider) {
 				await modelRegistry.refreshDiscoverableProviders([discoverableProvider], "online-if-uncached");
+				rolePattern = expandRoleAlias(prewalkTarget, activeSettings, modelRegistry.getAvailable());
 				resolved = resolveCliModel({ cliModel: rolePattern, modelRegistry, preferences: modelMatchPreferences });
 			}
 		}
@@ -1406,9 +1408,8 @@ export async function buildSessionOptions(
 		// no configured auth, warn and leave prewalk unarmed rather than aborting
 		// startup and locking the user out of the app (issue #6064).
 		if (resolved.error || !resolved.model) {
-			const target = parsed.prewalkInto ?? DEFAULT_PREWALK_TARGET;
 			process.stderr.write(
-				`${chalk.yellow(`Warning: prewalk disabled — ${resolved.error ?? `model "${target}" not found`}`)}\n`,
+				`${chalk.yellow(`Warning: prewalk disabled — ${resolved.error ?? `model "${prewalkTarget}" not found`}`)}\n`,
 			);
 		} else if (!modelRegistry.hasConfiguredAuth(resolved.model)) {
 			process.stderr.write(
