@@ -101,7 +101,7 @@ describe("AgentSession model switch auth pre-flight", () => {
 			modelRolePresets: {
 				applyOnSelect: false,
 				[`${to.provider}/${to.id}`]: {
-					default: { smol: smolSelector },
+					default: { roles: { smol: smolSelector } },
 				},
 			},
 		});
@@ -127,7 +127,7 @@ describe("AgentSession model switch auth pre-flight", () => {
 		const settings = Settings.isolated({
 			modelRolePresets: {
 				keepRolesWhenUnset: true,
-				[`${to.provider}/${to.id}`]: { default: { smol: `${to.provider}/${to.id}:low` } },
+				[`${to.provider}/${to.id}`]: { default: { roles: { smol: `${to.provider}/${to.id}:low` } } },
 			},
 		});
 		settings.setModelRole("slow", existingSlow);
@@ -147,7 +147,7 @@ describe("AgentSession model switch auth pre-flight", () => {
 			const target = `${from.provider}/${from.id}:low`;
 			const settings = Settings.isolated({
 				modelRolePresets: {
-					[`${to.provider}/${to.id}`]: { default: { smol: "@slow", slow: target } },
+					[`${to.provider}/${to.id}`]: { default: { roles: { smol: "@slow", slow: target } } },
 				},
 			});
 			settings.setModelRole("slow", oldSlow);
@@ -170,7 +170,7 @@ describe("AgentSession model switch auth pre-flight", () => {
 		const settings = Settings.isolated({
 			modelRolePresets: {
 				[`${to.provider}/${to.id}`]: {
-					default: { smol: "@slow:high", slow: "@plan", plan: target },
+					default: { roles: { smol: "@slow:high", slow: "@plan", plan: target } },
 				},
 			},
 		});
@@ -193,7 +193,7 @@ describe("AgentSession model switch auth pre-flight", () => {
 		const to = modelOrThrow("claude-sonnet-4-6");
 		const selected = `${to.provider}/${to.id}`;
 		const settings = Settings.isolated({
-			modelRolePresets: { [selected]: { default: { smol: "@default:low" } } },
+			modelRolePresets: { [selected]: { default: { roles: { smol: "@default:low" } } } },
 		});
 		settings.setModelRole("default", "anthropic/missing-old-default");
 		const s = makeSession(from, undefined, settings);
@@ -214,7 +214,7 @@ describe("AgentSession model switch auth pre-flight", () => {
 		const settings = Settings.isolated({
 			modelRolePresets: {
 				[selected]: {
-					default: { smol: "@slow", slow: "@smol", vision: "@plan", plan: "anthropic/missing-model" },
+					default: { roles: { smol: "@slow", slow: "@smol", vision: "@plan", plan: "anthropic/missing-model" } },
 				},
 			},
 		});
@@ -241,7 +241,7 @@ describe("AgentSession model switch auth pre-flight", () => {
 		const original = `${from.provider}/${from.id}`;
 		const selected = `${to.provider}/${to.id}`;
 		const settings = Settings.isolated({
-			modelRolePresets: { keepRolesWhenUnset, [selected]: { default: { smol: "@vision" } } },
+			modelRolePresets: { keepRolesWhenUnset, [selected]: { default: { roles: { smol: "@vision" } } } },
 		});
 		settings.setModelRole("vision", original);
 		const s = makeSession(from, undefined, settings);
@@ -260,7 +260,7 @@ describe("AgentSession model switch auth pre-flight", () => {
 			const original = `${from.provider}/${from.id}`;
 			const selected = `${to.provider}/${to.id}`;
 			const settings = Settings.isolated({
-				modelRolePresets: { keepRolesWhenUnset, [selected]: { default: { smol: selected } } },
+				modelRolePresets: { keepRolesWhenUnset, [selected]: { default: { roles: { smol: selected } } } },
 			});
 			// A custom role created in the Roles view, absent from the applied preset.
 			settings.setModelRole("reviewer", original);
@@ -281,7 +281,7 @@ describe("AgentSession model switch auth pre-flight", () => {
 		const selected = `${to.provider}/${to.id}`;
 		const settings = Settings.isolated({
 			modelRoleStorage: "project",
-			modelRolePresets: { keepRolesWhenUnset: false, [selected]: { default: { smol: "@vision" } } },
+			modelRolePresets: { keepRolesWhenUnset: false, [selected]: { default: { roles: { smol: "@vision" } } } },
 		});
 		settings.setModelRole("vision", original);
 		settings.setProjectModelRole("vision", "anthropic/missing-project-vision");
@@ -391,7 +391,7 @@ describe("AgentSession model switch auth pre-flight", () => {
 				autoLoad: false,
 				applyOnSelect: true,
 				keepRolesWhenUnset: false,
-				[`${to.provider}/${to.id}`]: { default: { smol: saved } },
+				[`${to.provider}/${to.id}`]: { default: { roles: { smol: saved } } },
 			},
 		});
 		settings.setModelRole("smol", original);
@@ -422,7 +422,7 @@ describe("AgentSession model switch auth pre-flight", () => {
 				modelRoleStorage: "project",
 				modelRolePresets: {
 					keepRolesWhenUnset: false,
-					[selected]: { default: { smol: saved } },
+					[selected]: { default: { roles: { smol: saved } } },
 				},
 			},
 		});
@@ -474,7 +474,7 @@ describe("AgentSession model switch auth pre-flight", () => {
 				modelRoles: { default: original, smol: `${original}:high`, slow: `${original}:low` },
 				modelRolePresets: {
 					autoLoad: false,
-					[selected]: { presets: { Work: { smol: `${selected}:low` } } },
+					[selected]: { presets: { Work: { roles: { smol: `${selected}:low` } } } },
 				},
 			},
 		});
@@ -523,7 +523,7 @@ describe("AgentSession model switch auth pre-flight", () => {
 			configFiles: [overlayPath],
 			overrides: {
 				modelRoleStorage: "project",
-				modelRolePresets: { [selected]: { default: { smol: `${selected}:low` } } },
+				modelRolePresets: { [selected]: { default: { roles: { smol: `${selected}:low` } } } },
 			},
 		});
 		const s = makeSession(from, undefined, settings);
@@ -564,7 +564,7 @@ describe("AgentSession model switch auth pre-flight", () => {
 		const settings = Settings.isolated({
 			modelRoleStorage: "project",
 			modelRoles: { default: selected, smol: selected, slow: selected },
-			modelRolePresets: { [selected]: { default: { smol: `${selected}:low` } } },
+			modelRolePresets: { [selected]: { default: { roles: { smol: `${selected}:low` } } } },
 		});
 		for (const role of ["default", "smol", "slow"]) settings.setProjectModelRole(role, original);
 		const s = makeSession(from, undefined, settings);

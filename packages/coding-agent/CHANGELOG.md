@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Model role presets now save and restore the primary selector and global fallback chains, preserving routing, fallback order, and per-model reasoning levels.
+- Named model role presets can be renamed with `r` in `/models`, preserving their contents and Default selection.
+
 ## [18.2.1] - 2026-09-15
 
 ### Breaking Changes

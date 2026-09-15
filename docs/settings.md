@@ -398,30 +398,67 @@ model keeps all roles local.
 
 Each default model has a **Default** role profile. The active profile is the
 target for role edits: press `s` to save it, or enable
-`modelRolePresets.autoSave` to save supporting-role edits automatically.
+`modelRolePresets.autoSave` to save role and captured fallback-chain edits automatically.
 Changing the default model does not itself auto-save carried roles over its
 saved preset.
 
 Use **Save current roles as preset…** to create and activate a named profile.
 Names start with a letter and may contain letters, digits, spaces, `-`, and `_`;
-`Default` is reserved, regardless of capitalization. Press `x` on the active
-preset to reapply it, or on an inactive named preset to delete it. Press `d` on
-a named preset to make it the model's Default; `d` on the Default row resets
-that choice to OMP's built-in profile only when built-ins are enabled; otherwise
-no built-in assignments are loaded. The star marks the default choice.
+`Default` is reserved, regardless of capitalization. Press `r` on a named preset
+to rename it — the payload moves verbatim and a Default pointer that named it
+follows; renames that would collide with an existing preset or a reserved name
+are rejected. Press `x` on the active preset to reapply it, or on an inactive
+named preset to delete it. Press `d` on a named preset to make it the model's
+Default; `d` on the Default row resets that choice to OMP's built-in profile
+only when built-ins are enabled; otherwise no built-in assignments are loaded.
+The star marks the default choice.
 
 Saved preset definitions live in the active global/profile settings under
-`modelRolePresets`, keyed by `provider/model`. Applying a preset respects
-`modelRoleStorage`: project mode writes role assignments only to the current
-project, without changing global fallbacks. Clearing an omitted project role
-reveals its global fallback. Existing configuration overlays remain authoritative.
-Unavailable preset entries fall back to the selected model.
+`modelRolePresets`, keyed by `provider/model`. Each preset is a structured
+record:
+
+```yaml
+modelRolePresets:
+  anthropic/claude-opus-5:
+    presets:
+      quality:
+        roles:
+          smol: anthropic/claude-haiku-4-5:low
+          slow: anthropic/claude-opus-5:high
+          default: anthropic/claude-opus-5:high # optional: binds the primary selector
+        fallbackChains: # optional: full snapshot of retry.fallbackChains at save time
+          task: [anthropic/claude-haiku-4-5:low, anthropic/claude-opus-5:high]
+          anthropic/*: [anthropic/claude-haiku-4-5:medium]
+```
+
+`roles` maps role names to model selectors using the standard selector grammar
+(`provider/model`, effort suffixes like `:low`, and `@upstream` routing). An
+optional `default` entry binds the primary selector itself — routing and effort
+included — so applying the preset restores the exact reasoning setup rather than
+inheriting whatever effort was active. `fallbackChains` records the entire
+`retry.fallbackChains` map as it existed in the global settings layer at save
+time: role keys, exact `provider/model-id` keys, and `provider/*` wildcards
+alike, in order and verbatim.
+
+Applying a preset restores its roles and then replaces the global-layer chain
+map wholesale with the captured snapshot, so switching between presets never
+leaves the previous profile's chains behind. Chain snapshots are captured from
+and restored to the global settings layer — the layer preset definitions live
+in — so project-file, overlay, or runtime chain values are never baked into a
+preset or persisted into global state by an apply. A preset without a
+`fallbackChains` key (role-only or built-in profiles) leaves chains untouched;
+an explicit empty snapshot (`fallbackChains: {}`) restores an empty chain map.
+`modelRoleStorage: project` still scopes role assignments to the project,
+leaving global role assignments unchanged. Chain snapshots always restore to
+the global layer, where the chain editor writes. Existing configuration
+overlays remain authoritative. Unavailable preset entries fall back to the selected model.
 
 Resetting a Default or deleting the last named preset removes the model's
 configuration entry when nothing remains. Empty `presets` containers are not
-retained by these operations. An explicitly saved `default: {}` remains meaningful:
-it suppresses built-in fallback and follows the omitted-role setting. Roles
-preserved by that setting do not by themselves mark the preset as unsaved.
+retained by these operations. An explicitly saved `default: { roles: {} }`
+remains meaningful: it suppresses built-in fallback and follows the
+omitted-role setting. Roles preserved by that setting do not by themselves mark
+the preset as unsaved.
 
 ### Advisor
 

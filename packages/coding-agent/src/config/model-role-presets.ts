@@ -7,11 +7,21 @@ import { formatModelStringWithRouting } from "./model-resolver";
 export const MODEL_PRESET_ROLES = ["smol", "slow", "vision", "plan", "commit", "tiny", "task", "advisor"] as const;
 
 /**
- * One saved role profile. Built-in roles are always represented; user-defined
- * roles created in the Roles view are carried verbatim so saving a preset does
- * not silently drop them.
+ * One saved role profile. `roles` maps role name → model selector for every
+ * role the preset assigns (built-ins and custom roles). A `default` entry —
+ * when present — binds the primary selector itself, routing and effort suffix
+ * included, so a saved Default restores the exact reasoning setup. An optional
+ * `fallbackChains` snapshot records the ordered `retry.fallbackChains` map
+ * captured at save time — role keys, exact `provider/id` keys, and
+ * `provider/*` wildcards alike, entries verbatim including `:level` and
+ * `@upstream` suffixes. A preset without `fallbackChains` leaves fallback
+ * chains untouched when applied, while an explicit `{}` clears the captured
+ * chain map.
  */
-export type ModelRolePreset = Partial<Record<string, string>>;
+export interface ModelRolePreset {
+	roles: Record<string, string>;
+	fallbackChains?: Record<string, string[]>;
+}
 
 const MODEL_ROLE_PRESET_NAME_PATTERN = /^[a-zA-Z][\w -]*$/;
 
@@ -30,22 +40,39 @@ export function modelRolePresetRoles(preset: ModelRolePreset | undefined, extraR
 	const add = (role: string): void => {
 		if (role !== "default" && !roles.includes(role)) roles.push(role);
 	};
-	for (const role in preset) add(role);
+	if (preset) for (const role in preset.roles) add(role);
 	if (extraRoleKeys) for (const role of extraRoleKeys) add(role);
 	return roles;
 }
 
-function toRolePreset(value: unknown): ModelRolePreset | undefined {
-	if (!isRecord(value)) return undefined;
-	const result: ModelRolePreset = {};
-	// Every configured role except `default` (the preset's own model) round-trips,
-	// so a custom role survives a save/apply cycle.
-	for (const role in value) {
-		if (role === "default") continue;
-		const assignment = value[role];
-		if (typeof assignment === "string") result[role] = assignment;
+function toPresetPayload(value: unknown): ModelRolePreset | undefined {
+	if (!isRecord(value) || !isRecord(value.roles)) return undefined;
+	const roles: Record<string, string> = {};
+	for (const role in value.roles) {
+		const assignment = value.roles[role];
+		if (typeof assignment === "string") roles[role] = assignment;
 	}
-	return result;
+	const chains = sanitizeFallbackChains(value.fallbackChains);
+	const payload: ModelRolePreset = { roles };
+	if (chains) payload.fallbackChains = chains;
+	return payload;
+}
+
+/**
+ * Normalize a fallback-chain record: drops non-array chains and non-string
+ * entries so edits through the UI operate on well-formed data. Returns
+ * undefined for non-records; a valid empty record is preserved (it means
+ * "clear preset-owned chains" when applied).
+ */
+export function sanitizeFallbackChains(value: unknown): Record<string, string[]> | undefined {
+	if (!isRecord(value)) return undefined;
+	const chains: Record<string, string[]> = {};
+	for (const key in value) {
+		const chain = value[key];
+		if (!Array.isArray(chain)) continue;
+		chains[key] = chain.filter((entry): entry is string => typeof entry === "string");
+	}
+	return chains;
 }
 
 function selector(model: Model): string {
@@ -71,15 +98,17 @@ function curatedModel(selected: Model, available: readonly Model[], role: "smol"
 	}
 	return best;
 }
-
 /** Same-provider catalog-ranked choices; eligibility and priority are authored in KDL. */
 export function buildDefaultModelRolePreset(selected: Model, available: readonly Model[]): ModelRolePreset {
 	const selectedSelector = formatModelStringWithRouting(selected);
-	const sameModel = Object.fromEntries(MODEL_PRESET_ROLES.map(role => [role, selectedSelector])) as ModelRolePreset;
-	if (isLoopbackUrl(selected.baseUrl)) return sameModel;
+	const sameModel = Object.fromEntries(MODEL_PRESET_ROLES.map(role => [role, selectedSelector])) as Record<
+		string,
+		string
+	>;
+	if (isLoopbackUrl(selected.baseUrl)) return { roles: sameModel };
 	const fast = curatedModel(selected, available, "smol");
 	const comprehensive = curatedModel(selected, available, "slow");
-	return {
+	const curated = {
 		...sameModel,
 		smol: formatModelStringWithRouting(fast),
 		tiny: formatModelStringWithRouting(fast),
@@ -89,6 +118,7 @@ export function buildDefaultModelRolePreset(selected: Model, available: readonly
 		plan: formatModelStringWithRouting(comprehensive),
 		advisor: formatModelStringWithRouting(comprehensive),
 	};
+	return { roles: curated };
 }
 
 /** Return valid saved-preset names for one selected model. */
@@ -97,7 +127,7 @@ export function getModelRolePresetNames(value: unknown, model: Model): string[] 
 	const presets = storedPresets(value[selector(model)]);
 	if (!presets) return [];
 	return Object.keys(presets)
-		.filter(name => isModelRolePresetName(name) && isRecord(presets[name]))
+		.filter(name => isModelRolePresetName(name) && isRecord(presets[name]) && isRecord(presets[name].roles))
 		.sort((a, b) => a.localeCompare(b));
 }
 
@@ -110,7 +140,7 @@ export function getModelRolePreset(
 	if (!name || !isModelRolePresetName(name) || !isRecord(value)) return undefined;
 	const presets = storedPresets(value[selector(model)]);
 	if (!presets || !isRecord(presets[name])) return undefined;
-	return toRolePreset(presets[name]);
+	return toPresetPayload(presets[name]);
 }
 
 /** A model's saved Default, or undefined for OMP's built-in Default. */
@@ -118,7 +148,7 @@ export function getModelRolePresetDefault(value: unknown, model: Model): ModelRo
 	if (!isRecord(value)) return undefined;
 	const entry = value[selector(model)];
 	if (!isRecord(entry)) return undefined;
-	const direct = toRolePreset(entry.default);
+	const direct = toPresetPayload(entry.default);
 	if (direct) return direct;
 	return typeof entry.default === "string" ? getModelRolePreset(value, model, entry.default) : undefined;
 }
@@ -133,21 +163,33 @@ export function getModelRolePresetDefaultName(value: unknown, model: Model): str
 	return getModelRolePreset(value, model, entry.default) ? entry.default : undefined;
 }
 
-/** Add or replace one named preset while preserving presets for other models. */
 export function saveModelRolePreset(
 	value: unknown,
 	model: Model,
 	name: string,
 	roles: Readonly<Record<string, string | undefined>>,
+	fallbackChains?: Readonly<Record<string, readonly string[]>>,
 ): Record<string, unknown> {
 	const next: Record<string, unknown> = isRecord(value) ? { ...value } : {};
 	if (!isModelRolePresetName(name)) return next;
+	const payload: ModelRolePreset = { roles: filterRoles(roles) };
+	if (fallbackChains) payload.fallbackChains = sanitizeFallbackChains(fallbackChains) ?? {};
 	const current = next[selector(model)];
 	next[selector(model)] = {
 		...(isRecord(current) ? current : {}),
-		presets: { ...storedPresets(current), [name]: toRolePreset(roles) },
+		presets: { ...storedPresets(current), [name]: payload },
 	};
 	return next;
+}
+
+/** Copy a role-assignment map into preset form, keeping the `default` selector and dropping non-strings. */
+function filterRoles(roles: Readonly<Record<string, string | undefined>>): Record<string, string> {
+	const filtered: Record<string, string> = {};
+	for (const role in roles) {
+		const assignment = roles[role];
+		if (typeof assignment === "string") filtered[role] = assignment;
+	}
+	return filtered;
 }
 
 /** Save the current role assignment map as this model's Default preset. */
@@ -155,13 +197,38 @@ export function saveModelRolePresetDefault(
 	value: unknown,
 	model: Model,
 	roles: Readonly<Record<string, string | undefined>>,
+	fallbackChains?: Readonly<Record<string, readonly string[]>>,
 ): Record<string, unknown> {
 	const next: Record<string, unknown> = isRecord(value) ? { ...value } : {};
+	const payload: ModelRolePreset = { roles: filterRoles(roles) };
+	if (fallbackChains) payload.fallbackChains = sanitizeFallbackChains(fallbackChains) ?? {};
 	const current = next[selector(model)];
 	next[selector(model)] = {
 		...(isRecord(current) ? current : {}),
-		default: toRolePreset(roles),
+		default: payload,
 	};
+	return next;
+}
+
+/**
+ * Rename a saved preset in place. The payload moves verbatim and the Default
+ * pointer follows when it named the old preset. Invalid source, invalid target,
+ * or a name collision returns the input unchanged.
+ */
+export function renameModelRolePreset(value: unknown, model: Model, from: string, to: string): Record<string, unknown> {
+	const next: Record<string, unknown> = isRecord(value) ? { ...value } : {};
+	if (!isModelRolePresetName(from) || !isModelRolePresetName(to) || from === to) return next;
+	const current = next[selector(model)];
+	const presets = storedPresets(current);
+	if (!isRecord(current) || !presets || !Object.hasOwn(presets, from) || Object.hasOwn(presets, to)) {
+		return next;
+	}
+	const remaining = { ...presets };
+	remaining[to] = remaining[from];
+	delete remaining[from];
+	const entry: Record<string, unknown> = { ...current, presets: remaining };
+	if (entry.default === from) entry.default = to;
+	next[selector(model)] = entry;
 	return next;
 }
 
@@ -193,6 +260,12 @@ export function setModelRolePresetDefault(
 	if (!presets || !isRecord(presets[name])) return next;
 	next[selector(model)] = { ...(isRecord(current) ? current : {}), default: name };
 	return next;
+}
+
+/** Whether a preset entry exists under `name` for `model`, regardless of payload validity. */
+export function modelRolePresetKeyExists(value: unknown, model: Model, name: string): boolean {
+	const presets = storedPresets(isRecord(value) ? value[selector(model)] : undefined);
+	return !!presets && Object.hasOwn(presets, name);
 }
 
 /** Delete a named preset; deleting the named Default restores OMP's built-in Default. */

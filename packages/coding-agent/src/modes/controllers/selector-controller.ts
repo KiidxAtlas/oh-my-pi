@@ -25,6 +25,8 @@ import {
 } from "../../config/model-resolver";
 import {
 	deleteModelRolePreset,
+	renameModelRolePreset,
+	sanitizeFallbackChains,
 	saveModelRolePreset,
 	saveModelRolePresetDefault,
 	setModelRolePresetDefault,
@@ -1037,6 +1039,59 @@ export class SelectorController {
 	}
 
 	/**
+	 * Snapshot of the global layer's `retry.fallbackChains` map, captured
+	 * verbatim (role keys, exact-model keys, provider wildcards, `:level` and
+	 * `@upstream` suffixes) when a preset is saved. Presets are global-owned and
+	 * apply restores them to the same global layer, so project-file or overlay
+	 * chain entries are never baked into a preset.
+	 */
+	#fallbackChainSnapshot(): Record<string, string[]> {
+		try {
+			return sanitizeFallbackChains(this.ctx.settings.getGlobalRetryFallbackChains()) ?? {};
+		} catch {
+			return {};
+		}
+	}
+	/**
+	 * Roles map captured for a preset save. The persisted `default` selector is
+	 * kept verbatim only when it resolves to this model (aliases, bare ids, and
+	 * `@upstream` routing resolve exactly like runtime lookups); anything else
+	 * is dropped so a preset can never bind a foreign primary. When the default
+	 * carries no explicit suffix and the configured thinking level is auto, an
+	 * explicit `:auto` suffix is added so auto stays distinct from inherit.
+	 */
+	#capturedPresetRoles(
+		model: Model,
+		roles: Readonly<Record<string, string | undefined>>,
+	): Record<string, string | undefined> {
+		const result: Record<string, string | undefined> = { ...roles };
+		const defaultEntry = result.default;
+		if (defaultEntry !== undefined) {
+			const scopedModels = this.ctx.session.scopedModels.map(sm => sm.model);
+			const availableModels = scopedModels.length > 0 ? scopedModels : this.ctx.session.getAvailableModels();
+			const resolved = resolveModelRoleValue(defaultEntry, availableModels, { settings: this.ctx.settings });
+			const isOwner =
+				resolved.model !== undefined &&
+				resolved.model.provider === model.provider &&
+				resolved.model.id === model.id;
+			if (!isOwner) {
+				delete result.default;
+			} else if (
+				!resolved.explicitThinkingLevel &&
+				parseConfiguredThinkingLevel(
+					(this.ctx.settings.getGlobalSettings() as Record<string, unknown>)["defaultThinkingLevel"] as
+						| string
+						| null
+						| undefined,
+				) === AUTO_THINKING
+			) {
+				result.default = `${defaultEntry}:auto`;
+			}
+		}
+		return result;
+	}
+
+	/**
 	 * Fullscreen model hub on the alternate screen (the /settings idiom): the
 	 * overlay enables mouse tracking for its lifetime and the transcript stays
 	 * untouched underneath. `initialProviderId` preselects a provider's sidebar
@@ -1125,26 +1180,36 @@ export class SelectorController {
 								if (isAuto) this.ctx.settings.set("defaultThinkingLevel", AUTO_THINKING);
 								if (presetSelection) this.ctx.session.applyModelRolePreset(model, presetSelection, targetScope);
 							} else {
-								const { switched } = await this.ctx.session.setModel(model, role, {
-									selector: selectorValue,
-									thinkingLevel: isAuto ? ThinkingLevel.Inherit : concreteThinking,
-									persist: targetScope === "global",
-									// Project storage must name the layer explicitly: otherwise a preset
-									// request makes `ModelControls` default the scope to `project` and the
-									// Global chip would write `.omp/config.yml` instead of the global config.
-									scope: configuredStorage === "project" ? targetScope : undefined,
-									modelRolePreset: presetSelection,
-								});
+								const { switched, defaultRoleValue, defaultThinking } = await this.ctx.session.setModel(
+									model,
+									role,
+									{
+										selector: selectorValue,
+										thinkingLevel: isAuto ? ThinkingLevel.Inherit : concreteThinking,
+										persist: targetScope === "global",
+										// Project storage must name the layer explicitly: otherwise a preset
+										// request makes `ModelControls` default the scope to `project` and the
+										// Global chip would write `.omp/config.yml` instead of the global config.
+										scope: configuredStorage === "project" ? targetScope : undefined,
+										modelRolePreset: presetSelection,
+									},
+								);
 								if (!switched) return false;
 								if (targetScope === "project") {
+									// An applied preset's captured default selector wins over the
+									// carried-over value from the previous default model.
 									this.ctx.settings.setProjectModelRole(
 										"default",
-										formatModelSelectorValue(selectorValue, concreteThinking),
+										defaultRoleValue ?? formatModelSelectorValue(selectorValue, concreteThinking),
 									);
 								}
-								if (isAuto) this.ctx.session.setThinkingLevel(AUTO_THINKING, true);
-								else if (concreteThinking && concreteThinking !== ThinkingLevel.Inherit) {
-									this.ctx.session.setThinkingLevel(concreteThinking);
+								// The preset's captured default effort (applied session-side by
+								// `setModel`) must not be overwritten by the pre-switch level.
+								if (defaultThinking === undefined) {
+									if (isAuto) this.ctx.session.setThinkingLevel(AUTO_THINKING, true);
+									else if (concreteThinking && concreteThinking !== ThinkingLevel.Inherit) {
+										this.ctx.session.setThinkingLevel(concreteThinking);
+									}
 								}
 								this.ctx.statusLine.invalidate();
 								this.ctx.updateEditorBorderColor();
@@ -1267,7 +1332,7 @@ export class SelectorController {
 							: undefined;
 						const isAuto = configuredThinking === AUTO_THINKING;
 						const concreteThinking = concreteThinkingLevel(configuredThinking);
-						const { switched } = await this.ctx.session.setModel(model, "default", {
+						const { switched, defaultThinking } = await this.ctx.session.setModel(model, "default", {
 							selector: formatModelStringWithRouting(model),
 							thinkingLevel: isAuto ? ThinkingLevel.Inherit : (concreteThinking ?? ThinkingLevel.Inherit),
 							persist: true,
@@ -1289,9 +1354,13 @@ export class SelectorController {
 										},
 						});
 						if (!switched) return false;
-						if (isAuto) this.ctx.session.setThinkingLevel(AUTO_THINKING, true);
-						else if (concreteThinking && concreteThinking !== ThinkingLevel.Inherit) {
-							this.ctx.session.setThinkingLevel(concreteThinking);
+						// The preset's captured default effort (applied session-side by
+						// `setModel`) must not be overwritten by the pre-switch level.
+						if (defaultThinking === undefined) {
+							if (isAuto) this.ctx.session.setThinkingLevel(AUTO_THINKING, true);
+							else if (concreteThinking && concreteThinking !== ThinkingLevel.Inherit) {
+								this.ctx.session.setThinkingLevel(concreteThinking);
+							}
 						}
 						this.ctx.statusLine.invalidate();
 						this.ctx.updateEditorBorderColor();
@@ -1312,9 +1381,22 @@ export class SelectorController {
 							: this.ctx.settings.getGlobalModelRoles();
 					this.ctx.settings.set(
 						"modelRolePresets",
-						saveModelRolePreset(this.ctx.settings.getGlobalModelRolePresets(), model, name, roles),
+						saveModelRolePreset(
+							this.ctx.settings.getGlobalModelRolePresets(),
+							model,
+							name,
+							this.#capturedPresetRoles(model, roles),
+							this.#fallbackChainSnapshot(),
+						),
 					);
 					this.ctx.showStatus(`Saved ${model.id} preset: ${name}`);
+				},
+				onRenamePreset: (model, from, to) => {
+					this.ctx.settings.set(
+						"modelRolePresets",
+						renameModelRolePreset(this.ctx.settings.getGlobalModelRolePresets(), model, from, to),
+					);
+					this.ctx.showStatus(`Renamed ${model.id} preset: ${from} → ${to}`);
 				},
 				onSetDefaultPreset: (model, name) => {
 					this.ctx.settings.set(
@@ -1329,11 +1411,13 @@ export class SelectorController {
 						this.ctx.settings.get("modelRoleStorage") === "project"
 							? this.ctx.settings.getProjectModelRoles()
 							: this.ctx.settings.getGlobalModelRoles();
+					const chains = this.#fallbackChainSnapshot();
+					const capturedRoles = this.#capturedPresetRoles(model, roles);
 					this.ctx.settings.set(
 						"modelRolePresets",
 						name === undefined
-							? saveModelRolePresetDefault(presets, model, roles)
-							: saveModelRolePreset(presets, model, name, roles),
+							? saveModelRolePresetDefault(presets, model, capturedRoles, chains)
+							: saveModelRolePreset(presets, model, name, capturedRoles, chains),
 					);
 					this.ctx.showStatus(
 						`${automatic ? "Updated" : "Saved"} ${model.id} ${name === undefined ? "Default preset" : `preset: ${name}`}`,

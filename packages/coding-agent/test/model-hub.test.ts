@@ -240,7 +240,7 @@ describe("ModelHub", () => {
 			const model = makeModel("test", "primary");
 			const settings = Settings.isolated({
 				modelRoles: { default: "test/primary", smol: "test/existing" },
-				modelRolePresets: { applyOnSelect: false, "test/primary": { presets: {}, default: {} } },
+				modelRolePresets: { applyOnSelect: false, "test/primary": { presets: {}, default: { roles: {} } } },
 			});
 			const onSaveActivePreset = vi.fn();
 			const onApplyPreset = vi.fn();
@@ -262,7 +262,7 @@ describe("ModelHub", () => {
 		test("does not mark a preset unsaved when an unavailable assignment falls back to the selected model", () => {
 			const model = makeModel("test", "primary");
 			const settings = Settings.isolated({
-				modelRolePresets: { "test/primary": { default: { smol: "test/missing" } } },
+				modelRolePresets: { "test/primary": { default: { roles: { smol: "test/missing" } } } },
 			});
 			settings.setModelRole("default", "test/primary");
 			settings.setModelRole("smol", "test/primary");
@@ -298,7 +298,7 @@ describe("ModelHub", () => {
 				modelRolePresets: {
 					"test/primary": {
 						presets: {
-							quality: { slow: "test/primary" },
+							quality: { roles: { slow: "test/primary" } },
 						},
 					},
 				},
@@ -330,7 +330,7 @@ describe("ModelHub", () => {
 				modelRolePresets: {
 					applyOnSelect: false,
 					"test/primary": {
-						presets: { quality: { smol: "test/quality" } },
+						presets: { quality: { roles: { smol: "test/quality" } } },
 						default: "quality",
 					},
 				},
@@ -362,7 +362,7 @@ describe("ModelHub", () => {
 			const settings = Settings.isolated({
 				modelRoles: { default: "test/primary", smol: "test/edited" },
 				modelRolePresets: {
-					"test/primary": { presets: { quality: { smol: "test/saved" } } },
+					"test/primary": { presets: { quality: { roles: { smol: "test/saved" } } } },
 				},
 			});
 			const applied = Promise.withResolvers<boolean>();
@@ -392,14 +392,14 @@ describe("ModelHub", () => {
 			applied.resolve(false);
 			await applied.promise;
 			hub.handleInput("s");
-			expect(getModelRolePreset(settings.get("modelRolePresets"), model, "quality")?.smol).toBe("test/saved");
-			expect(getModelRolePresetDefault(settings.get("modelRolePresets"), model)?.smol).toBe("test/edited");
+			expect(getModelRolePreset(settings.get("modelRolePresets"), model, "quality")?.roles.smol).toBe("test/saved");
+			expect(getModelRolePresetDefault(settings.get("modelRolePresets"), model)?.roles.smol).toBe("test/edited");
 		});
 		test("blocks hub input while an async preset application is pending", async () => {
 			const model = makeModel("test", "primary");
 			const settings = Settings.isolated({
 				modelRoles: { default: "test/primary" },
-				modelRolePresets: { "test/primary": { presets: { quality: { slow: "test/primary" } } } },
+				modelRolePresets: { "test/primary": { presets: { quality: { roles: { slow: "test/primary" } } } } },
 			});
 			const applied = Promise.withResolvers<boolean>();
 			const onApplyPreset = vi.fn(() => applied.promise);
@@ -439,7 +439,7 @@ describe("ModelHub", () => {
 				modelRolePresets: {
 					autoLoad: false,
 					autoSave: true,
-					"test/second": { default: { smol: "test/second" } },
+					"test/second": { default: { roles: { smol: "test/second" } } },
 				},
 			});
 			const { hub } = createHub({
@@ -465,7 +465,7 @@ describe("ModelHub", () => {
 			hub.handleInput("\n");
 			await Promise.resolve();
 			expect(settings.getModelRole("default")).toBe("test/second");
-			expect(getModelRolePresetDefault(settings.get("modelRolePresets"), second)?.smol).toBe("test/second");
+			expect(getModelRolePresetDefault(settings.get("modelRolePresets"), second)?.roles.smol).toBe("test/second");
 			expect(settings.getModelRole("smol")).toBe("test/first");
 		});
 		test("auto-save captures a supporting-role assignment into the active preset", async () => {
@@ -504,7 +504,7 @@ describe("ModelHub", () => {
 			await Promise.resolve();
 
 			expect(settings.getModelRole("smol")).toBe("test/helper");
-			expect(getModelRolePresetDefault(settings.get("modelRolePresets"), primary)?.smol).toBe("test/helper");
+			expect(getModelRolePresetDefault(settings.get("modelRolePresets"), primary)?.roles.smol).toBe("test/helper");
 		});
 
 		test("global edits do not dirty a project-scoped active preset", async () => {
@@ -513,7 +513,7 @@ describe("ModelHub", () => {
 			const settings = Settings.isolated({
 				modelRoleStorage: "project",
 				modelRolePresets: {
-					"test/primary": { default: { smol: "test/primary" } },
+					"test/primary": { default: { roles: { smol: "test/primary" } } },
 				},
 			});
 			settings.setProjectModelRole("default", "test/primary");
@@ -543,7 +543,7 @@ describe("ModelHub", () => {
 
 			expect(settings.getGlobalModelRole("smol")).toBe("test/helper");
 			expect(settings.getProjectModelRole("smol")).toBeUndefined();
-			expect(getModelRolePresetDefault(settings.get("modelRolePresets"), primary)?.smol).toBe("test/primary");
+			expect(getModelRolePresetDefault(settings.get("modelRolePresets"), primary)?.roles.smol).toBe("test/primary");
 			expect(onSaveActivePreset).not.toHaveBeenCalled();
 			expect(normalize(hub.render(220))).not.toContain("(unsaved)");
 		});

@@ -8502,7 +8502,15 @@ export class AgentSession {
 	 * of leaving the session pinned to the old model.
 	 * @throws Error if no API key available for the model
 	 */
-	async setModel(model: Model, role: string = "default", options?: SetModelOptions): Promise<{ switched: boolean }> {
+	async setModel(
+		model: Model,
+		role: string = "default",
+		options?: SetModelOptions,
+	): Promise<{
+		switched: boolean;
+		defaultRoleValue?: string;
+		defaultThinking?: ConfiguredThinkingLevel;
+	}> {
 		return this.#models.setModel(model, role, options);
 	}
 
