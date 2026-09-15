@@ -192,8 +192,8 @@ type StripState =
 			scope?: ModelRoleSelectionScope;
 			chips: StripChip[];
 			index: number;
-			/** Where to land when a scope or thinking strip closes. */
-			returnToRoles: boolean;
+			/** Thinking level selected when this strip opened. */
+			initialThinkingLevel?: ConfiguredThinkingLevel;
 	  }
 	| {
 			/** Footer text input naming a new custom role. */
@@ -242,6 +242,8 @@ export class ModelHubComponent implements Component {
 	#activePreset: { model: Model; name: string | undefined; useBuiltInDefault: boolean } | undefined;
 	#activePresetDirty = false;
 	#activePresetManuallyDirty = false;
+	#assignmentPending = false;
+	#disposed = false;
 	#presetApplicationId = 0;
 	#availableItems: ModelBrowserItem[] = [];
 	#recentItems: ModelBrowserItem[] = [];
@@ -346,6 +348,7 @@ export class ModelHubComponent implements Component {
 	/** Cancel pending provider refresh timers and the spinner. Host calls this on overlay close. */
 	dispose(): void {
 		this.#presetApplicationId++;
+		this.#disposed = true;
 		for (const [, timer] of this.#scheduledProviderRefreshes) clearTimeout(timer);
 		this.#scheduledProviderRefreshes.clear();
 		this.#refreshingProviders.clear();
@@ -993,6 +996,34 @@ export class ModelHubComponent implements Component {
 		const resolved = this.#roleForScope(role, scope);
 		return resolved.explicitThinkingLevel ? (resolved.thinkingLevel ?? ThinkingLevel.Inherit) : ThinkingLevel.Inherit;
 	}
+	#finishAssignment(result: void | boolean | Promise<void | boolean>, onSuccess: () => void): void {
+		if (!(result instanceof Promise)) {
+			if (result !== false) onSuccess();
+			else this.#tui.requestRender();
+			return;
+		}
+		this.#assignmentPending = true;
+		this.#tui.requestRender();
+		void result.then(
+			applied => {
+				this.#assignmentPending = false;
+				if (this.#disposed) return;
+				if (applied !== false) onSuccess();
+				else this.#tui.requestRender();
+			},
+			() => {
+				this.#assignmentPending = false;
+				if (!this.#disposed) this.#tui.requestRender();
+			},
+		);
+	}
+	#openScopeStrip(item: ModelBrowserItem, role: string, returnToRoles: boolean): void {
+		const chips: StripChip[] = [
+			{ label: "project", styled: theme.fg("accent", "project"), action: "scope", scope: "project" },
+			{ label: "global", styled: theme.fg("muted", "global"), action: "scope", scope: "global" },
+		];
+		this.#strip = { kind: "scope", item, role, chips, index: 0, returnToRoles };
+	}
 
 	/** Persist `role → item`, preserving a still-supported thinking level, then open the thinking strip. */
 	#assignRole(item: ModelBrowserItem, role: string, returnToRoles: boolean, scope?: ModelRoleSelectionScope): void {
@@ -1010,9 +1041,11 @@ export class ModelHubComponent implements Component {
 		}
 		const supported = this.#thinkingOptionsFor(item.model);
 		if (!supported.includes(level)) level = ThinkingLevel.Inherit;
-		this.#mutateRole(role, () => this.#callbacks.onAssign(item.model, role, level, item.selector, scope));
-		this.#refreshAfterMutation();
-		this.#openThinkingStrip(item, role, returnToRoles, scope);
+		const result = this.#callbacks.onAssign(item.model, role, level, item.selector, scope);
+		this.#finishAssignment(result, () => {
+			this.#refreshAfterMutation();
+			this.#openThinkingStrip(item, role, returnToRoles, scope);
+		});
 	}
 
 	#unassignRole(role: string): void {
@@ -1118,14 +1151,6 @@ export class ModelHubComponent implements Component {
 		this.#strip = { kind: "role", item, chips, index: 0, returnToRoles: false };
 	}
 
-	#openScopeStrip(item: ModelBrowserItem, role: string, returnToRoles: boolean): void {
-		const chips: StripChip[] = [
-			{ label: "project", styled: theme.fg("accent", "project"), action: "scope", scope: "project" },
-			{ label: "global", styled: theme.fg("muted", "global"), action: "scope", scope: "global" },
-		];
-		this.#strip = { kind: "scope", item, role, chips, index: 0, returnToRoles };
-	}
-
 	#openThinkingStrip(
 		item: ModelBrowserItem,
 		role: string,
@@ -1147,6 +1172,7 @@ export class ModelHubComponent implements Component {
 			chips,
 			index: preselect >= 0 ? preselect : 0,
 			returnToRoles,
+			initialThinkingLevel: current,
 		};
 	}
 
@@ -1354,22 +1380,24 @@ export class ModelHubComponent implements Component {
 						return;
 					}
 					const role = strip.role;
-					this.#mutateRole(role, () =>
-						this.#callbacks.onAssign(
+					const changed = chip.thinkingLevel !== strip.initialThinkingLevel;
+					if (changed) {
+						const result = this.#callbacks.onAssign(
 							strip.item.model,
 							role,
 							chip.thinkingLevel,
 							strip.item.selector,
 							strip.scope,
-						),
-					);
-					this.#refreshAfterMutation();
+						);
+						this.#closeStrip();
+						this.#finishAssignment(result, () => this.#refreshAfterMutation());
+					} else {
+						this.#closeStrip();
+					}
+					return;
 				}
-				this.#closeStrip();
-				return;
 		}
 	}
-
 	/** Switch the body into assign mode for `role`: full catalog, cleared query, current model preselected. */
 	#startAssign(role: string): void {
 		this.#assigning = { kind: "role", role };
@@ -1565,6 +1593,7 @@ export class ModelHubComponent implements Component {
 	// ═══════════════════════════════════════════════════════════════════════
 
 	handleInput(data: string): void {
+		if (this.#assignmentPending) return;
 		if (data.startsWith("\x1b[<")) {
 			routeSgrMouseInput(data, event => this.#routeMouseEvent(event));
 			return;
@@ -2502,6 +2531,9 @@ export class ModelHubComponent implements Component {
 
 	/** Footer row: active strip (chips) or the contextual hint line. */
 	#renderFooter(width: number): string {
+		if (this.#assignmentPending) {
+			return truncateToWidth(theme.fg("accent", " Applying model…"), width);
+		}
 		this.#chipRanges = [];
 		const strip = this.#strip;
 		if (!strip) {
