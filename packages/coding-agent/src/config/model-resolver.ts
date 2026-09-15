@@ -1295,10 +1295,20 @@ function resolveConfiguredRolePattern(
 /**
  * Expand a role alias like "@smol" to the configured model string.
  */
-export function expandRoleAlias(value: string, settings?: ModelRoleLookup): string {
+export function expandRoleAlias(
+	value: string,
+	settings?: ModelRoleLookup,
+	availableModels?: readonly Model<Api>[],
+): string {
 	const normalized = value.trim();
 	const source = normalized === DEFAULT_MODEL_ROLE ? (settings?.getModelRole("default") ?? value) : value;
-	return resolveConfiguredModelPatterns(source, settings)[0] ?? value;
+	return (
+		resolveConfiguredModelPatterns(source, settings, {
+			normalizeLiteralModelPattern: availableModels
+				? createLiteralModelPatternNormalizer(availableModels)
+				: undefined,
+		})[0] ?? value
+	);
 }
 
 export function resolveConfiguredModelPatterns(
@@ -1469,20 +1479,9 @@ export interface ResolvedModelRoleValue {
 	warning: string | undefined;
 }
 
-export function resolveModelRoleValue(
-	roleValue: string | undefined,
-	availableModels: Model<Api>[],
-	options?: { settings?: Settings; roleLookup?: ModelRoleLookup; matchPreferences?: ModelMatchPreferences },
-): ResolvedModelRoleValue {
-	if (!roleValue) {
-		return { model: undefined, thinkingLevel: undefined, explicitThinkingLevel: false, warning: undefined };
-	}
-
-	const normalized = roleValue.trim();
-	if (!normalized || normalized === DEFAULT_MODEL_ROLE) {
-		return { model: undefined, thinkingLevel: undefined, explicitThinkingLevel: false, warning: undefined };
-	}
-
+function createLiteralModelPatternNormalizer(
+	availableModels: readonly Model<Api>[],
+): (pattern: string) => string | undefined {
 	const literalModelPatterns = new Map<string, string | undefined>();
 	const addLiteralModelPattern = (pattern: string, canonical: string): void => {
 		const key = pattern.toLowerCase();
@@ -1497,8 +1496,25 @@ export function resolveModelRoleValue(
 		addLiteralModelPattern(selector, selector);
 		addLiteralModelPattern(model.id, model.id);
 	}
+	return pattern => literalModelPatterns.get(pattern.trim().toLowerCase());
+}
+
+export function resolveModelRoleValue(
+	roleValue: string | undefined,
+	availableModels: Model<Api>[],
+	options?: { settings?: Settings; roleLookup?: ModelRoleLookup; matchPreferences?: ModelMatchPreferences },
+): ResolvedModelRoleValue {
+	if (!roleValue) {
+		return { model: undefined, thinkingLevel: undefined, explicitThinkingLevel: false, warning: undefined };
+	}
+
+	const normalized = roleValue.trim();
+	if (!normalized || normalized === DEFAULT_MODEL_ROLE) {
+		return { model: undefined, thinkingLevel: undefined, explicitThinkingLevel: false, warning: undefined };
+	}
+
 	const effectivePatterns = resolveConfiguredModelPatterns(normalized, options?.roleLookup ?? options?.settings, {
-		normalizeLiteralModelPattern: pattern => literalModelPatterns.get(pattern.trim().toLowerCase()),
+		normalizeLiteralModelPattern: createLiteralModelPatternNormalizer(availableModels),
 	});
 	if (!effectivePatterns || effectivePatterns.length === 0) {
 		return { model: undefined, thinkingLevel: undefined, explicitThinkingLevel: false, warning: undefined };
@@ -1612,7 +1628,7 @@ export function resolveModelFromSettings(options: {
 	for (const role of roles) {
 		const configured = settings.getModelRole(role);
 		if (!configured) continue;
-		const expanded = expandRoleAlias(configured, settings).trim();
+		const expanded = expandRoleAlias(configured, settings, availableModels).trim();
 		if (expanded.includes("/")) {
 			sawConfiguredProviderQualifiedRole = true;
 		}

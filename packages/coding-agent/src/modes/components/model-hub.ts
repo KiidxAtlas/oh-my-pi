@@ -39,6 +39,7 @@ import {
 	MODEL_PRESET_ROLES,
 } from "../../config/model-role-presets";
 import {
+	filterAvailableModelsByEnabledPatterns,
 	formatModelSelectorValue,
 	formatModelStringWithRouting,
 	type ModelRoleLookup,
@@ -387,7 +388,12 @@ export class ModelHubComponent implements Component {
 			this.#configError = loadError ? String(loadError) : undefined;
 			allModels = this.#registry.getAll();
 			try {
-				availableModels = this.#registry.getAvailable();
+				const registryAvailable = this.#registry.getAvailable();
+				const enabledPatterns = this.#settings.get("enabledModels");
+				availableModels =
+					enabledPatterns.length > 0
+						? filterAvailableModelsByEnabledPatterns(registryAvailable, enabledPatterns, this.#settings)
+						: registryAvailable;
 			} catch (error) {
 				this.#configError = error instanceof Error ? error.message : String(error);
 				availableModels = [];
