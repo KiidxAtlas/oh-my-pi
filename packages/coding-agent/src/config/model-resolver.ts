@@ -1293,12 +1293,8 @@ function resolveConfiguredRolePattern(
  */
 export function expandRoleAlias(value: string, settings?: ModelRoleLookup): string {
 	const normalized = value.trim();
-	if (normalized === DEFAULT_MODEL_ROLE) {
-		return settings?.getModelRole("default") ?? value;
-	}
-
-	const resolved = resolveConfiguredRolePattern(value, settings)?.[0];
-	return resolved ?? value;
+	const source = normalized === DEFAULT_MODEL_ROLE ? (settings?.getModelRole("default") ?? value) : value;
+	return resolveConfiguredModelPatterns(source, settings)[0] ?? value;
 }
 
 export function resolveConfiguredModelPatterns(

@@ -2060,6 +2060,14 @@ describe("expandRoleAlias", () => {
 		expect(expandRoleAlias("@vision", settings)).toBe("openai/gpt-4o");
 	});
 
+	test("resolves multi-hop aliases through the public helper", () => {
+		const settings = Settings.isolated({
+			modelRoles: { vision: "@smol", smol: "@slow", slow: "openai/gpt-4o" },
+		});
+
+		expect(expandRoleAlias("@vision", settings)).toBe("openai/gpt-4o");
+	});
+
 	test("keeps @vision alias when vision role is unset", () => {
 		const settings = Settings.isolated();
 		settings.setModelRole("default", "anthropic/claude-sonnet-4-5");

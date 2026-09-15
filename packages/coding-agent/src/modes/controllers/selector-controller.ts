@@ -17,7 +17,9 @@ import {
 import { reset as resetCapabilities } from "../../capability";
 import { showGitOverlay } from "../../cli/git-tui";
 import {
+	extractExplicitThinkingSelector,
 	formatModelSelectorValue,
+	formatModelStringWithRouting,
 	resolveAdvisorRoleSelection,
 	resolveModelRoleValue,
 } from "../../config/model-resolver";
@@ -1190,8 +1192,19 @@ export class SelectorController {
 				onApplyPreset: async (model, name, applyOptions) => {
 					const releaseDefaultMutation = await this.#acquireDefaultRoleMutation();
 					try {
+						const configuredThinking = extractExplicitThinkingSelector(
+							this.ctx.settings.getModelRole("default"),
+							this.ctx.settings,
+							{
+								isLiteralModelId: (provider, id) =>
+									this.ctx.session.modelRegistry.find(provider, id) !== undefined,
+							},
+						);
+						const isAuto = configuredThinking === AUTO_THINKING;
+						const concreteThinking = concreteThinkingLevel(configuredThinking);
 						const { switched } = await this.ctx.session.setModel(model, "default", {
-							selector: `${model.provider}/${model.id}`,
+							selector: formatModelStringWithRouting(model),
+							thinkingLevel: isAuto ? ThinkingLevel.Inherit : (concreteThinking ?? ThinkingLevel.Inherit),
 							persist: true,
 							scope: this.ctx.settings.get("modelRoleStorage"),
 							modelRolePreset: applyOptions?.useBuiltInDefault
@@ -1211,6 +1224,10 @@ export class SelectorController {
 										},
 						});
 						if (!switched) return false;
+						if (isAuto) this.ctx.session.setThinkingLevel(AUTO_THINKING, true);
+						else if (concreteThinking && concreteThinking !== ThinkingLevel.Inherit) {
+							this.ctx.session.setThinkingLevel(concreteThinking);
+						}
 						this.ctx.statusLine.invalidate();
 						this.ctx.updateEditorBorderColor();
 						this.ctx.showStatus(`${model.id} applied preset: ${name ?? "Default"}`);
@@ -1224,14 +1241,13 @@ export class SelectorController {
 					}
 				},
 				onSavePreset: (model, name) => {
+					const roles =
+						this.ctx.settings.get("modelRoleStorage") === "project"
+							? this.ctx.settings.getProjectModelRoles()
+							: this.ctx.settings.getGlobalModelRoles();
 					this.ctx.settings.set(
 						"modelRolePresets",
-						saveModelRolePreset(
-							this.ctx.settings.get("modelRolePresets"),
-							model,
-							name,
-							this.ctx.settings.getModelRoles(),
-						),
+						saveModelRolePreset(this.ctx.settings.getGlobalModelRolePresets(), model, name, roles),
 					);
 					this.ctx.showStatus(`Saved ${model.id} preset: ${name}`);
 				},
