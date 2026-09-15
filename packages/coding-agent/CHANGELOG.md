@@ -381,6 +381,7 @@
 - `@upstream` routing selectors accept tiered OpenRouter slugs (`openrouter/google/gemini-3.8-flash@google-ai-studio/priority`), and `omp bench` labels each routed model with its upstream.
 - `/skill:<name>` in the composer becomes an atomic skill chip (icon + name, linked to its SKILL.md) once you finish typing it or accept it from autocomplete — it deletes as one unit and survives draft restores, like image chips.
 - The transcript now flags a gateway serving a different Claude model than requested: a `⚠ served claude-haiku-4-5-20251001 · requested claude-opus-5 · via openrouter/Amazon Bedrock` divider under the first affected turn, shown once per substitution per session.
+- Save and apply model-specific role presets in `/models`, with configurable auto-loading, optional built-in defaults, and project-scoped role assignments ([#12103](https://github.com/can1357/oh-my-pi/pull/12103) by [@KiidxAtlas](https://github.com/KiidxAtlas)).
 
 ### Changed
 
@@ -389,7 +390,6 @@
 - Interactive startup paints its speculative frame before loading the session runtime; model/auth dialogs and browser/computer preludes load on first use.
 - Status-line redraws reuse unchanged segment output, settings groups, and tool token estimates while preserving live invalidation.
 - Skill invocations render as a normal user turn: a mid-prompt skill shows as an inline chip in the user bubble; a leading skill shows as a railed callout with the chip and prompt size, with the rest of your message rendered as full multi-line Markdown instead of a single collapsed header.
-- Save and apply model-specific role presets in `/models`, with configurable auto-loading, optional built-in defaults, and project-scoped role assignments ([#12103](https://github.com/can1357/oh-my-pi/pull/12103) by [@KiidxAtlas](https://github.com/KiidxAtlas)).
 
 ### Fixed
 
