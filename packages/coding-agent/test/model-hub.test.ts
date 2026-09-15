@@ -399,6 +399,45 @@ describe("ModelHub", () => {
 			expect(getModelRolePresetDefault(settings.get("modelRolePresets"), second)?.smol).toBe("test/second");
 			expect(settings.getModelRole("smol")).toBe("test/first");
 		});
+		test("auto-save captures a supporting-role assignment into the active preset", async () => {
+			const primary = makeModel("test", "primary");
+			const helper = makeModel("test", "helper");
+			const settings = Settings.isolated();
+			settings.setModelRole("default", "test/primary");
+			settings.setModelRole("smol", "test/primary");
+			settings.set("modelRolePresets.autoSave", true);
+			settings.set(
+				"modelRolePresets",
+				saveModelRolePresetDefault(settings.get("modelRolePresets"), primary, { smol: "test/primary" }),
+			);
+			const { hub } = createHub({
+				models: [primary, helper],
+				scoped: true,
+				settings,
+				callbacks: {
+					onAssign: (_model, role, _thinking, selector) => settings.setModelRole(role, selector),
+					onSaveActivePreset: (selected, name) => {
+						const presets = settings.get("modelRolePresets");
+						const roles = settings.getModelRoles();
+						settings.set(
+							"modelRolePresets",
+							name === undefined
+								? saveModelRolePresetDefault(presets, selected, roles)
+								: saveModelRolePreset(presets, selected, name, roles),
+						);
+					},
+				},
+			});
+			for (const ch of "helper") hub.handleInput(ch);
+			hub.handleInput("\n"); // Role strip for test/helper.
+			hub.handleInput(DOWN); // default chip → smol chip.
+			hub.handleInput("\n"); // Assign smol.
+			await Promise.resolve();
+
+			expect(settings.getModelRole("smol")).toBe("test/helper");
+			expect(getModelRolePresetDefault(settings.get("modelRolePresets"), primary)?.smol).toBe("test/helper");
+		});
+
 		test("thinking-only edits preserve the model and scope from the persisted role layer", () => {
 			const storedModel = makeModel("test", "global-role-model");
 			const effectiveModel = makeModel("test", "runtime-role-model");

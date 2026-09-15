@@ -273,19 +273,7 @@ export class ModelControls {
 			);
 		}
 		if (presetSelection) {
-			const shouldApply =
-				presetSelection.kind !== "on-select" ||
-				(this.#host.settings.get("modelRolePresets.autoLoad") &&
-					(getModelRolePresetDefault(this.#host.settings.get("modelRolePresets"), targetModel) !== undefined ||
-						this.#host.settings.get("modelRolePresets.applyOnSelect")));
-			if (shouldApply) {
-				this.#applyModelRolePreset(
-					targetModel,
-					presetSelection,
-					this.#host.settings.get("modelRolePresets.keepRolesWhenUnset") && !presetSelection.replaceUnsetRoles,
-					scope,
-				);
-			}
+			this.applyModelRolePreset(targetModel, presetSelection, scope);
 		}
 		if (shadowed) return { switched: false };
 		this.#host.settings.getStorage()?.recordModelUsage(`${targetModel.provider}/${targetModel.id}`);
@@ -295,6 +283,27 @@ export class ModelControls {
 		this.#reapplyThinkingLevel(targetModel.thinking?.defaultLevel);
 		await this.#host.syncAfterModelChange(previousEditMode);
 		return { switched: true };
+	}
+
+	/**
+	 * Apply a role preset to one settings layer without touching the live model.
+	 * {@link setModel} routes through this, and so must callers that persist a
+	 * default which a higher-precedence layer shadows — otherwise the newly
+	 * selected default lands without its saved or built-in supporting roles.
+	 */
+	applyModelRolePreset(model: Model, selection: ModelRolePresetSelection, scope: "global" | "project"): void {
+		const shouldApply =
+			selection.kind !== "on-select" ||
+			(this.#host.settings.get("modelRolePresets.autoLoad") &&
+				(getModelRolePresetDefault(this.#host.settings.get("modelRolePresets"), model) !== undefined ||
+					this.#host.settings.get("modelRolePresets.applyOnSelect")));
+		if (!shouldApply) return;
+		this.#applyModelRolePreset(
+			model,
+			selection,
+			this.#host.settings.get("modelRolePresets.keepRolesWhenUnset") && !selection.replaceUnsetRoles,
+			scope,
+		);
 	}
 
 	#setModelRole(role: string, value: string | undefined, scope: "global" | "project"): void {

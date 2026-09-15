@@ -338,7 +338,12 @@ import {
 	USER_INTERRUPT_LABEL,
 	VIBE_MODE_CONTEXT_MESSAGE_TYPE,
 } from "./messages";
-import { ModelControls, type ModelControlsHost, type SetModelOptions } from "./model-controls";
+import {
+	ModelControls,
+	type ModelControlsHost,
+	type ModelRolePresetSelection,
+	type SetModelOptions,
+} from "./model-controls";
 import {
 	isPrewalkPlanNudge,
 	PrewalkCoordinator,
@@ -8499,6 +8504,11 @@ export class AgentSession {
 	 */
 	async setModel(model: Model, role: string = "default", options?: SetModelOptions): Promise<{ switched: boolean }> {
 		return this.#models.setModel(model, role, options);
+	}
+
+	/** Applies a role preset to one settings layer without switching the live model. */
+	applyModelRolePreset(model: Model, selection: ModelRolePresetSelection, scope: "global" | "project"): void {
+		this.#models.applyModelRolePreset(model, selection, scope);
 	}
 
 	/** Selects a model for this session without updating persisted model settings. */

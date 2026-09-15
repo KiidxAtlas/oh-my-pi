@@ -749,6 +749,15 @@ function isProviderLockedCrossMatch(pattern: string, matchedModel: Model<Api>): 
 	if (matchedModel.provider.toLowerCase() === provider) {
 		return false;
 	}
+	// A cross-provider exact-id match on a provider that has no bundled
+	// catalog at all is a user-configured custom provider (models.json /
+	// models.yml): the user wrote this literal id explicitly, so resolving
+	// it is stated intent rather than an aggregator shadow, and the lock
+	// must not fire (#8800). Bundled providers (e.g. OpenRouter) keep the
+	// lock below unchanged.
+	if (getBundledModels(matchedModel.provider.toLowerCase() as GeneratedProvider).length === 0) {
+		return false;
+	}
 	// Case- and revision-spelling-insensitive on both halves: the surrounding
 	// matcher lowercases the selector before comparing ids, and
 	// resolveProviderModelReference accepts `5.1` for `5-1`, so the lock must
@@ -1140,21 +1149,27 @@ function shouldInheritDefaultBeforePriority(role: ModelRole): boolean {
 
 /**
  * Roles that have no priority.json chain of their own reuse another role's
- * list. The advisor — a second-opinion reviewer — defaults to the `slow`
- * reasoning chain, but (unlike the `slow` role, see
- * {@link shouldInheritDefaultBeforePriority}) never inherits the primary's
- * model, so it stays a distinct strong model out of the box. The `tiny` role —
- * the override for online title/memory/classifier tasks — reuses the `smol`
- * fast chain so an unset tiny role auto-resolves to the same fast model smol
- * would pick.
+ * list. The advisor — a second-opinion reviewer — uses a configured `slow`
+ * role before that list, but never inherits the primary's model when `slow`
+ * is unset, so it stays a distinct strong model out of the box. The `tiny`
+ * role — the override for online title/memory/classifier tasks — resolves
+ * through `smol` so it picks the same configured, inherited, or built-in fast
+ * model.
  */
 const ROLE_PRIORITY_ALIAS: Partial<Record<ModelRole, keyof typeof MODEL_PRIO>> = {
 	advisor: "slow",
 	tiny: "smol",
 };
 
-const ROLE_CONFIGURED_FALLBACK: Partial<Record<ModelRole, ModelRole>> = {
-	tiny: "smol",
+interface ConfiguredRoleFallback {
+	role: ModelRole;
+	/** Skip the target role's default inheritance when it has no explicit configuration. */
+	configuredOnly: boolean;
+}
+
+const ROLE_CONFIGURED_FALLBACK: Partial<Record<ModelRole, ConfiguredRoleFallback>> = {
+	advisor: { role: "slow", configuredOnly: true },
+	tiny: { role: "smol", configuredOnly: false },
 };
 
 /** Built-in priority patterns for a role, following {@link ROLE_PRIORITY_ALIAS}. */
@@ -1235,11 +1250,13 @@ function resolveConfiguredRolePattern(
 	const roleDefaults = isModelRole(role) ? rolePriorityDefaults(role) : [];
 	const configuredFallback = isModelRole(role) ? ROLE_CONFIGURED_FALLBACK[role] : undefined;
 	const fallbackPatterns =
-		configured || !configuredFallback
+		configured ||
+		!configuredFallback ||
+		(configuredFallback.configuredOnly && !settings?.getModelRole(configuredFallback.role)?.trim())
 			? undefined
 			: (
 					resolveConfiguredRolePattern(
-						formatModelRoleAlias(configuredFallback),
+						formatModelRoleAlias(configuredFallback.role),
 						settings,
 						new Set(visited),
 						normalizeLiteralModelPattern,
@@ -1302,23 +1319,33 @@ export function expandRoleAlias(
 ): string {
 	const normalized = value.trim();
 	const source = normalized === DEFAULT_MODEL_ROLE ? (settings?.getModelRole("default") ?? value) : value;
-	return (
-		resolveConfiguredModelPatterns(source, settings, {
-			normalizeLiteralModelPattern: availableModels
-				? createLiteralModelPatternNormalizer(availableModels)
-				: undefined,
-		})[0] ?? value
-	);
+	return resolveConfiguredModelPatterns(source, settings, { availableModels })[0] ?? value;
+}
+
+export interface ConfiguredModelPatternOptions {
+	/**
+	 * Available models, used to canonicalize a configured selector whose id
+	 * legitimately ends in an effort token (`nanogpt/coding-router:low`) before
+	 * an outer alias effort (`@smol:high`) is applied. Callers that know their
+	 * candidate set MUST pass it; otherwise the literal suffix is stripped as
+	 * if it were an inner effort and a different model resolves.
+	 */
+	availableModels?: readonly Model<Api>[];
+	/** Pre-built normalizer; takes precedence over {@link availableModels}. */
+	normalizeLiteralModelPattern?: (pattern: string) => string | undefined;
 }
 
 export function resolveConfiguredModelPatterns(
 	value: string | string[] | undefined,
 	settings?: ModelRoleLookup,
-	options?: { normalizeLiteralModelPattern?: (pattern: string) => string | undefined },
+	options?: ConfiguredModelPatternOptions,
 ): string[] {
 	const patterns = normalizeModelPatternList(value);
+	const normalizeLiteralModelPattern =
+		options?.normalizeLiteralModelPattern ??
+		(options?.availableModels ? createLiteralModelPatternNormalizer(options.availableModels) : undefined);
 	const expand = (pattern: string, visited: Set<string>): string[] => {
-		const resolved = resolveConfiguredRolePattern(pattern, settings, visited, options?.normalizeLiteralModelPattern);
+		const resolved = resolveConfiguredRolePattern(pattern, settings, visited, normalizeLiteralModelPattern);
 		if (!resolved) return [];
 		return resolved.flatMap(value =>
 			resolveExplicitModelRole(value, settings) ? expand(value, new Set(visited)) : [value],
@@ -1347,10 +1374,7 @@ function resolveEffectiveAgentModelSelection(
 	options: AgentModelPatternResolutionOptions,
 ): EffectiveAgentModelSelection {
 	const { requestModel, settingsOverride, agentModel, settings, activeModelPattern, fallbackModelPattern } = options;
-	const normalizeLiteralModelPattern = options.availableModels
-		? createLiteralModelPatternNormalizer(options.availableModels)
-		: undefined;
-	const resolutionOptions = normalizeLiteralModelPattern ? { normalizeLiteralModelPattern } : undefined;
+	const resolutionOptions = { availableModels: options.availableModels };
 
 	const requestPatterns = resolveConfiguredModelPatterns(requestModel, settings, resolutionOptions);
 	if (requestPatterns.length > 0) {
@@ -1557,6 +1581,8 @@ export function resolveModelRoleValue(
 
 interface ExplicitThinkingSelectorOptions {
 	isLiteralModelId?: (provider: string, id: string) => boolean;
+	/** Candidate set used when expanding role aliases, so literal effort-like ids survive. */
+	availableModels?: readonly Model<Api>[];
 }
 
 function isLiteralModelSelector(value: string, options?: ExplicitThinkingSelectorOptions): boolean {
@@ -1589,7 +1615,7 @@ export function extractExplicitThinkingSelector(
 		) {
 			return maxSelector;
 		}
-		const expanded = expandRoleAlias(current, settings).trim();
+		const expanded = expandRoleAlias(current, settings, options?.availableModels).trim();
 		if (!expanded || expanded === current) break;
 		if (expanded === DEFAULT_MODEL_ROLE) return undefined;
 		current = expanded;
@@ -1713,7 +1739,13 @@ export async function resolveModelOverrideWithAuthFallback(
 	authFallbackUsed: boolean;
 	warning?: string;
 }> {
-	const primary = resolveModelOverride(modelPatterns, modelRegistry, settings);
+	const disabledProviders = new Set(settings?.get("disabledProviders"));
+	let lookupRegistry: ModelLookupRegistry = modelRegistry;
+	if (disabledProviders.size > 0) {
+		const enabledModels = modelRegistry.getAvailable().filter(model => !disabledProviders.has(model.provider));
+		lookupRegistry = { getAvailable: () => enabledModels };
+	}
+	const primary = resolveModelOverride(modelPatterns, lookupRegistry, settings);
 	if (!primary.model || !parentActiveModelPattern) {
 		return { ...primary, authFallbackUsed: false };
 	}
@@ -1723,7 +1755,7 @@ export async function resolveModelOverrideWithAuthFallback(
 		return { ...primary, authFallbackUsed: false };
 	}
 
-	const fallback = resolveModelOverride([parentActiveModelPattern], modelRegistry, settings);
+	const fallback = resolveModelOverride([parentActiveModelPattern], lookupRegistry, settings);
 	if (!fallback.model) {
 		return { ...primary, authFallbackUsed: false };
 	}

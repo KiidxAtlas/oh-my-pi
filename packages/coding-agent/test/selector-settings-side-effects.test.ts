@@ -460,6 +460,7 @@ describe("selector setting side effects", () => {
 				getContextUsage: () => undefined,
 				setModel,
 				setThinkingLevel: vi.fn(),
+				applyModelRolePreset: vi.fn(),
 			},
 			statusLine: { invalidate: vi.fn() },
 			updateEditorBorderColor: vi.fn(),
@@ -509,6 +510,7 @@ describe("selector setting side effects", () => {
 		const settings = Settings.isolated({ modelRoleStorage: "project" });
 		settings.setProjectModelRole("default", projectSelector);
 		const setModel = vi.fn(async () => ({ switched: true }));
+		const applyModelRolePreset = vi.fn();
 		const assignmentApplied = Promise.withResolvers<void>();
 		const capturedRuntimeAssignmentApplied = Promise.withResolvers<void>();
 		let globalStatusCount = 0;
@@ -548,6 +550,7 @@ describe("selector setting side effects", () => {
 				getContextUsage: () => undefined,
 				setModel,
 				setThinkingLevel: vi.fn(),
+				applyModelRolePreset,
 			},
 			statusLine: { invalidate: vi.fn() },
 			updateEditorBorderColor: vi.fn(),
@@ -575,6 +578,9 @@ describe("selector setting side effects", () => {
 			expect(settings.getGlobalModelRole("default")).toBe(globalSelector);
 			expect(settings.getProjectModelRole("default")).toBe(projectSelector);
 			expect(showStatus).toHaveBeenCalledWith(`Global default model: ${globalSelector}`);
+			// The shadowed layer still receives the selected model's preset, so
+			// dropping the shadow later reveals the default with its roles.
+			expect(applyModelRolePreset).toHaveBeenCalledWith(globalModel, { kind: "on-select" }, "global");
 
 			settings.overrideModelRoles({ default: globalSelector });
 			settings.setProjectModelRole("default", projectSelector);
@@ -649,6 +655,7 @@ describe("selector setting side effects", () => {
 				getContextUsage: () => undefined,
 				setModel,
 				setThinkingLevel: vi.fn(),
+				applyModelRolePreset: vi.fn(),
 			},
 			statusLine: { invalidate: vi.fn() },
 			updateEditorBorderColor: vi.fn(),
@@ -751,6 +758,7 @@ describe("selector setting side effects", () => {
 					getContextUsage: () => undefined,
 					setModel,
 					setThinkingLevel: vi.fn(),
+					applyModelRolePreset: vi.fn(),
 				},
 				statusLine: { invalidate: vi.fn() },
 				updateEditorBorderColor: vi.fn(),
@@ -859,6 +867,7 @@ describe("selector setting side effects", () => {
 					getContextUsage: () => undefined,
 					setModel,
 					setThinkingLevel: vi.fn(),
+					applyModelRolePreset: vi.fn(),
 				},
 				statusLine: { invalidate: vi.fn() },
 				updateEditorBorderColor: vi.fn(),
@@ -965,6 +974,7 @@ describe("selector setting side effects", () => {
 				getContextUsage: () => undefined,
 				setModel,
 				setThinkingLevel: vi.fn(),
+				applyModelRolePreset: vi.fn(),
 			},
 			statusLine: { invalidate: vi.fn() },
 			updateEditorBorderColor: vi.fn(),
@@ -1292,6 +1302,7 @@ describe("selector setting side effects", () => {
 				getContextUsage: () => undefined,
 				setModel,
 				setThinkingLevel: vi.fn(),
+				applyModelRolePreset: vi.fn(),
 			},
 			statusLine: { invalidate: vi.fn() },
 			updateEditorBorderColor: vi.fn(),
@@ -1379,6 +1390,7 @@ describe("selector setting side effects", () => {
 				getContextUsage: () => undefined,
 				setModel,
 				setThinkingLevel: vi.fn(),
+				applyModelRolePreset: vi.fn(),
 			},
 			statusLine: { invalidate: vi.fn() },
 			updateEditorBorderColor: vi.fn(),
@@ -1464,6 +1476,7 @@ describe("selector setting side effects", () => {
 				getContextUsage: () => undefined,
 				setModel,
 				setThinkingLevel: vi.fn(),
+				applyModelRolePreset: vi.fn(),
 			},
 			statusLine: { invalidate: vi.fn() },
 			updateEditorBorderColor: vi.fn(),
@@ -1567,6 +1580,7 @@ describe("selector setting side effects", () => {
 					getContextUsage: () => undefined,
 					setModel,
 					setThinkingLevel: vi.fn(),
+					applyModelRolePreset: vi.fn(),
 				},
 				statusLine: { invalidate: statusInvalidate },
 				updateEditorBorderColor,
@@ -1674,6 +1688,7 @@ describe("selector setting side effects", () => {
 					getContextUsage: () => undefined,
 					setModel,
 					setThinkingLevel: vi.fn(),
+					applyModelRolePreset: vi.fn(),
 				},
 				statusLine: { invalidate: vi.fn() },
 				updateEditorBorderColor: vi.fn(),
@@ -1845,6 +1860,7 @@ describe("selector setting side effects", () => {
 				getContextUsage: () => undefined,
 				setModel,
 				setThinkingLevel: vi.fn(),
+				applyModelRolePreset: vi.fn(),
 			},
 			statusLine: { invalidate: vi.fn() },
 			updateEditorBorderColor: vi.fn(),

@@ -18,6 +18,7 @@ import { reset as resetCapabilities } from "../../capability";
 import { showGitOverlay } from "../../cli/git-tui";
 import {
 	formatModelSelectorValue,
+	formatModelString,
 	formatModelStringWithRouting,
 	resolveAdvisorRoleSelection,
 	resolveModelRoleValue,
@@ -1064,7 +1065,11 @@ export class SelectorController {
 					const releaseDefaultMutation = role === "default" ? await this.#acquireDefaultRoleMutation() : undefined;
 					const configuredStorage = this.ctx.settings.get("modelRoleStorage");
 					const targetScope = configuredStorage === "project" ? (scope ?? "project") : "global";
-					const selectorValue = selector ?? formatModelStringWithRouting(model);
+					// Browser rows carry a routing-blind `provider/id` selector while the
+					// live model keeps its `@upstream` pin, so an unqualified selector must
+					// persist in routing-aware form or a restart re-routes the role.
+					const routedSelector = formatModelStringWithRouting(model);
+					const selectorValue = !selector || selector === formatModelString(model) ? routedSelector : selector;
 					const scopeLabel =
 						configuredStorage === "project" ? `${targetScope === "project" ? "Project" : "Global"} ` : "";
 					const defaultStatusLabel = configuredStorage === "project" ? `${scopeLabel}default` : "Default";
@@ -1074,20 +1079,46 @@ export class SelectorController {
 							// persist an explicit `:auto` suffix and must not mutate the current model.
 							const isAuto = thinkingLevel === AUTO_THINKING;
 							const concreteThinking = isAuto || thinkingLevel === undefined ? undefined : thinkingLevel;
-							const { switched } = await this.ctx.session.setModel(model, role, {
-								selector: selectorValue,
-								thinkingLevel: isAuto ? ThinkingLevel.Inherit : concreteThinking,
-								persist: true,
-								scope: targetScope,
-								modelRolePreset: { kind: "on-select" },
-							});
-							if (isAuto) {
-								if (switched) this.ctx.session.setThinkingLevel(AUTO_THINKING, true);
-								else this.ctx.settings.set("defaultThinkingLevel", AUTO_THINKING);
-							} else if (switched && concreteThinking && concreteThinking !== ThinkingLevel.Inherit) {
-								this.ctx.session.setThinkingLevel(concreteThinking);
-							}
-							if (switched) {
+							const effectiveProvenance = this.ctx.settings.getModelRoleProvenance("default");
+							const shadowedGlobal =
+								configuredStorage === "project" &&
+								targetScope === "global" &&
+								(effectiveProvenance === "project" ||
+									effectiveProvenance === "overlay" ||
+									(effectiveProvenance === "runtime" &&
+										this.ctx.settings.isProjectModelRoleRuntimeOverrideActive("default")));
+							const shadowedProject =
+								configuredStorage === "project" &&
+								targetScope === "project" &&
+								effectiveProvenance === "overlay";
+							if (shadowedGlobal || shadowedProject) {
+								// A higher-precedence layer owns the effective default, so the edit
+								// only rewrites its own layer and the live session keeps running the
+								// shadowing model. The preset still has to reach that layer, or
+								// removing the shadow later reveals a default without its roles.
+								const persistedValue = formatModelSelectorValue(selectorValue, concreteThinking);
+								if (shadowedGlobal) this.ctx.settings.setModelRole("default", persistedValue);
+								else this.ctx.settings.setProjectModelRole("default", persistedValue);
+								if (isAuto) this.ctx.settings.set("defaultThinkingLevel", AUTO_THINKING);
+								this.ctx.session.applyModelRolePreset(model, { kind: "on-select" }, targetScope);
+							} else {
+								const { switched } = await this.ctx.session.setModel(model, role, {
+									selector: selectorValue,
+									thinkingLevel: isAuto ? ThinkingLevel.Inherit : concreteThinking,
+									persist: targetScope === "global",
+									modelRolePreset: { kind: "on-select" },
+								});
+								if (!switched) return false;
+								if (targetScope === "project") {
+									this.ctx.settings.setProjectModelRole(
+										"default",
+										formatModelSelectorValue(selectorValue, concreteThinking),
+									);
+								}
+								if (isAuto) this.ctx.session.setThinkingLevel(AUTO_THINKING, true);
+								else if (concreteThinking && concreteThinking !== ThinkingLevel.Inherit) {
+									this.ctx.session.setThinkingLevel(concreteThinking);
+								}
 								this.ctx.statusLine.invalidate();
 								this.ctx.updateEditorBorderColor();
 							}
@@ -1107,6 +1138,9 @@ export class SelectorController {
 						}
 					} catch (error) {
 						this.ctx.showError(error instanceof Error ? error.message : String(error));
+						// The hub treats any non-`false` result as applied: report the failure
+						// so it stays on the current selection instead of advancing.
+						return false;
 					} finally {
 						releaseDefaultMutation?.();
 						hub?.refreshAfterExternalMutation();

@@ -1043,8 +1043,10 @@ export class ModelHubComponent implements Component {
 		}
 		const supported = this.#thinkingOptionsFor(item.model);
 		if (!supported.includes(level)) level = ThinkingLevel.Inherit;
+		const commitPresetEdit = this.#notePresetRoleEdit(role);
 		const result = this.#callbacks.onAssign(item.model, role, level, item.selector, scope);
 		this.#finishAssignment(result, () => {
+			commitPresetEdit();
 			this.#refreshAfterMutation();
 			this.#openThinkingStrip(item, role, returnToRoles, scope);
 		});
@@ -1059,13 +1061,27 @@ export class ModelHubComponent implements Component {
 		this.#refreshAfterMutation();
 	}
 
-	/** Late role edits must not auto-save into a different model or preset. */
-	#mutateRole(role: string, mutate: () => void | Promise<void>): void {
+	/**
+	 * Mark the active preset dirty for a supporting-role edit and return the
+	 * commit step that auto-saves it once the edit has actually been applied.
+	 * Every role mutation (assign, thinking change, unassign) MUST go through
+	 * this so `modelRolePresets.autoSave` captures it; a `default` edit never
+	 * dirties the preset it selects.
+	 */
+	#notePresetRoleEdit(role: string): () => void {
 		const active = this.#activePreset;
 		if (role !== "default" && active) this.#activePresetManuallyDirty = true;
+		return () => {
+			if (role !== "default" && active && this.#activePreset === active) this.#saveActivePreset(true);
+		};
+	}
+
+	/** Late role edits must not auto-save into a different model or preset. */
+	#mutateRole(role: string, mutate: () => void | Promise<void>): void {
+		const commitPresetEdit = this.#notePresetRoleEdit(role);
 		void Promise.resolve(mutate())
 			.then(() => {
-				if (role !== "default" && active && this.#activePreset === active) this.#saveActivePreset(true);
+				commitPresetEdit();
 				this.#refreshAfterMutation();
 			})
 			.catch(error => logger.warn("Model role edit failed", { role, error }));
@@ -1384,6 +1400,7 @@ export class ModelHubComponent implements Component {
 					const role = strip.role;
 					const changed = chip.thinkingLevel !== strip.initialThinkingLevel;
 					if (changed) {
+						const commitPresetEdit = this.#notePresetRoleEdit(role);
 						const result = this.#callbacks.onAssign(
 							strip.item.model,
 							role,
@@ -1392,7 +1409,10 @@ export class ModelHubComponent implements Component {
 							strip.scope,
 						);
 						this.#closeStrip();
-						this.#finishAssignment(result, () => this.#refreshAfterMutation());
+						this.#finishAssignment(result, () => {
+							commitPresetEdit();
+							this.#refreshAfterMutation();
+						});
 					} else {
 						this.#closeStrip();
 					}
