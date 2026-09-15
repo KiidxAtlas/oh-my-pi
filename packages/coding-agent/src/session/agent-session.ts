@@ -332,7 +332,7 @@ import {
 	USER_INTERRUPT_LABEL,
 	VIBE_MODE_CONTEXT_MESSAGE_TYPE,
 } from "./messages";
-import { ModelControls, type ModelControlsHost } from "./model-controls";
+import { ModelControls, type ModelControlsHost, type SetModelOptions } from "./model-controls";
 import {
 	isPrewalkPlanNudge,
 	PrewalkCoordinator,
@@ -8120,15 +8120,7 @@ export class AgentSession {
 	 * of leaving the session pinned to the old model.
 	 * @throws Error if no API key available for the model
 	 */
-	async setModel(
-		model: Model,
-		role: string = "default",
-		options?: {
-			selector?: string;
-			thinkingLevel?: ThinkingLevel;
-			persist?: boolean;
-		},
-	): Promise<{ switched: boolean }> {
+	async setModel(model: Model, role: string = "default", options?: SetModelOptions): Promise<{ switched: boolean }> {
 		return this.#models.setModel(model, role, options);
 	}
 

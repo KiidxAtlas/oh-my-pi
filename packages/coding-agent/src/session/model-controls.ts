@@ -13,6 +13,12 @@ import { getSupportedEfforts } from "@oh-my-pi/pi-catalog/model-thinking";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
 import { logger } from "@oh-my-pi/pi-utils";
 import { classifyDifficulty } from "../auto-thinking/classifier";
+import {
+	buildDefaultModelRolePreset,
+	getModelRolePreset,
+	getModelRolePresetDefault,
+	MODEL_PRESET_ROLES,
+} from "../config/model-role-presets";
 import type { ModelRegistry } from "../config/model-registry";
 import {
 	filterAvailableModelsByEnabledPatterns,
@@ -60,6 +66,21 @@ export interface ModelControlsHost {
 	emit(event: AgentSessionEvent): void;
 	emitSessionEvent(event: AgentSessionEvent): Promise<void>;
 	emitNotice(level: "info" | "warning" | "error", message: string, source?: string): void;
+}
+
+export type ModelRolePresetSelection =
+	| { kind: "on-select"; replaceUnsetRoles?: boolean }
+	| { kind: "configured-default"; replaceUnsetRoles?: boolean }
+	| { kind: "built-in-default"; replaceUnsetRoles?: boolean }
+	| { kind: "named"; name: string; replaceUnsetRoles?: boolean };
+
+export interface SetModelOptions {
+	selector?: string;
+	thinkingLevel?: ThinkingLevel;
+	persist?: boolean;
+	/** Presets default to configured storage; other writes retain the global default. */
+	scope?: "global" | "project";
+	modelRolePreset?: ModelRolePresetSelection;
 }
 
 /** Owns model selection, thinking effort, role cycling, and service tiers. */
@@ -212,15 +233,7 @@ export class ModelControls {
 		return undefined;
 	}
 
-	async setModel(
-		model: Model,
-		role: string = "default",
-		options?: {
-			selector?: string;
-			thinkingLevel?: ThinkingLevel;
-			persist?: boolean;
-		},
-	): Promise<{ switched: boolean }> {
+	async setModel(model: Model, role: string = "default", options?: SetModelOptions): Promise<{ switched: boolean }> {
 		const previousEditMode = this.#host.resolveActiveEditMode();
 		if (!this.#host.modelRegistry.hasConfiguredAuth(model)) {
 			throw new Error(`No API key for ${model.provider}/${model.id}`);
@@ -228,12 +241,25 @@ export class ModelControls {
 
 		const targetModel = await this.#host.modelRegistry.refreshSelectedModelMetadata(model);
 
-		this.#host.modelRegistry.clearSuppressedSelector(formatModelStringWithRouting(targetModel));
-		this.#host.clearActiveRetryFallback();
-		await this.#host.setModelWithProviderSessionReset(targetModel);
-		this.#host.sessionManager.appendModelChange(`${targetModel.provider}/${targetModel.id}`, role);
+		const presetSelection = role === "default" ? options?.modelRolePreset : undefined;
+		const scope = options?.scope ?? (presetSelection ? this.#host.settings.get("modelRoleStorage") : "global");
+		const provenance = this.#host.settings.getModelRoleProvenance(role);
+		const shadowed =
+			(options?.persist || presetSelection !== undefined) &&
+			(options?.scope !== undefined || presetSelection !== undefined) &&
+			(provenance === "overlay" ||
+				(scope === "global" &&
+					(provenance === "project" ||
+						(provenance === "runtime" && this.#host.settings.isProjectModelRoleRuntimeOverrideActive(role)))));
+
+		if (!shadowed) {
+			this.#host.modelRegistry.clearSuppressedSelector(formatModelStringWithRouting(targetModel));
+			this.#host.clearActiveRetryFallback();
+			await this.#host.setModelWithProviderSessionReset(targetModel);
+			this.#host.sessionManager.appendModelChange(`${targetModel.provider}/${targetModel.id}`, role);
+		}
 		if (options?.persist) {
-			this.#host.settings.setModelRole(
+			this.#setModelRole(
 				role,
 				formatRoleModelValue(
 					this.#host.settings,
@@ -243,8 +269,25 @@ export class ModelControls {
 					options.selector,
 					options.thinkingLevel,
 				),
+				scope,
 			);
 		}
+		if (presetSelection && (!shadowed || presetSelection.kind !== "on-select")) {
+			const shouldApply =
+				presetSelection.kind !== "on-select" ||
+				(this.#host.settings.get("modelRolePresets.autoLoad") &&
+					(getModelRolePresetDefault(this.#host.settings.get("modelRolePresets"), targetModel) !== undefined ||
+						this.#host.settings.get("modelRolePresets.applyOnSelect")));
+			if (shouldApply) {
+				this.#applyModelRolePreset(
+					targetModel,
+					presetSelection,
+					this.#host.settings.get("modelRolePresets.keepRolesWhenUnset") && !presetSelection.replaceUnsetRoles,
+					scope,
+				);
+			}
+		}
+		if (shadowed) return { switched: false };
 		this.#host.settings.getStorage()?.recordModelUsage(`${targetModel.provider}/${targetModel.id}`);
 
 		// Re-apply thinking for the newly selected model. Prefer the model's
@@ -252,6 +295,57 @@ export class ModelControls {
 		this.#reapplyThinkingLevel(targetModel.thinking?.defaultLevel);
 		await this.#host.syncAfterModelChange(previousEditMode);
 		return { switched: true };
+	}
+
+	#setModelRole(role: string, value: string | undefined, scope: "global" | "project"): void {
+		if (scope === "project") {
+			if (value === undefined) {
+				this.#host.settings.clearProjectModelRole(role);
+			} else {
+				this.#host.settings.setProjectModelRole(role, value);
+			}
+		} else {
+			this.#host.settings.setModelRole(role, value);
+		}
+	}
+
+	/** Replace supporting roles with the selected model's curated or saved preset. */
+	#applyModelRolePreset(
+		model: Model,
+		selection: ModelRolePresetSelection,
+		keepUnsetRoles: boolean,
+		scope: "global" | "project",
+	): void {
+		const available = this.getAvailableModels();
+		const savedPresets = this.#host.settings.get("modelRolePresets");
+		const savedPreset =
+			selection.kind === "built-in-default"
+				? undefined
+				: selection.kind === "named"
+					? getModelRolePreset(savedPresets, model, selection.name)
+					: getModelRolePresetDefault(savedPresets, model);
+		// An empty configured Default means "leave the supporting roles alone"
+		// unless the user explicitly enabled OMP's built-in role defaults. Named
+		// presets never silently become a built-in profile when they are missing.
+		const useBuiltInDefault =
+			savedPreset === undefined &&
+			selection.kind !== "named" &&
+			this.#host.settings.get("modelRolePresets.applyOnSelect");
+		if (!savedPreset && !useBuiltInDefault) return;
+		const preset = savedPreset ?? buildDefaultModelRolePreset(model, available);
+		for (const role of MODEL_PRESET_ROLES) {
+			const value = preset[role];
+			if (!value) {
+				if (!keepUnsetRoles) this.#setModelRole(role, undefined, scope);
+				continue;
+			}
+			const candidate = resolveModelRoleValue(value, available, { settings: this.#host.settings }).model;
+			const resolved =
+				candidate && this.#host.modelRegistry.hasConfiguredAuth(candidate)
+					? value
+					: `${model.provider}/${model.id}`;
+			this.#setModelRole(role, resolved, scope);
+		}
 	}
 
 	/**

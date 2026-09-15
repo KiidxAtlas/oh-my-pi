@@ -1,0 +1,199 @@
+import type { Model } from "@oh-my-pi/pi-ai";
+import { isRecord } from "@oh-my-pi/pi-utils";
+import MODEL_PRIO from "../priority.json" with { type: "json" };
+
+/** Roles replaced when a model preset is applied. The selected model remains the default role. */
+export const MODEL_PRESET_ROLES = ["smol", "slow", "vision", "plan", "commit", "tiny", "task", "advisor"] as const;
+
+export type ModelRolePreset = Partial<Record<(typeof MODEL_PRESET_ROLES)[number], string>>;
+
+const MODEL_ROLE_PRESET_NAME_PATTERN = /^[a-zA-Z][\w -]*$/;
+
+export function isModelRolePresetName(value: string): boolean {
+	return value.toLowerCase() !== "default" && MODEL_ROLE_PRESET_NAME_PATTERN.test(value);
+}
+
+function toRolePreset(value: unknown): ModelRolePreset | undefined {
+	if (!isRecord(value)) return undefined;
+	const result: ModelRolePreset = {};
+	for (const role of MODEL_PRESET_ROLES) {
+		if (typeof value[role] === "string") result[role] = value[role];
+	}
+	return result;
+}
+
+function selector(model: Model): string {
+	return `${model.provider}/${model.id}`;
+}
+
+function isLoopbackUrl(value: string): boolean {
+	try {
+		const hostname = new URL(value).hostname.replace(/^\[|\]$/g, "");
+		return (
+			hostname === "::" ||
+			hostname === "::1" ||
+			hostname === "0.0.0.0" ||
+			hostname.startsWith("127.") ||
+			hostname === "localhost"
+		);
+	} catch {
+		return false;
+	}
+}
+
+function storedPresets(value: unknown): Record<string, unknown> | undefined {
+	if (!isRecord(value)) return undefined;
+	return isRecord(value.presets) ? value.presets : undefined;
+}
+
+function curatedModel(selected: Model, available: readonly Model[], priority: readonly string[]): Model {
+	const candidates = available.filter(model => model.provider === selected.provider);
+	for (const pattern of priority) {
+		const normalized = pattern.toLowerCase();
+		const exact = candidates.find(model => {
+			const candidate = selector(model).toLowerCase();
+			return candidate === normalized || model.id.toLowerCase() === normalized;
+		});
+		if (exact) return exact;
+	}
+	return selected;
+}
+
+/** Same-provider exact priority.json entries only; no fuzzy or generation-based fallbacks. */
+export function buildDefaultModelRolePreset(selected: Model, available: readonly Model[]): ModelRolePreset {
+	const sameModel = Object.fromEntries(MODEL_PRESET_ROLES.map(role => [role, selector(selected)])) as ModelRolePreset;
+	if (isLoopbackUrl(selected.baseUrl)) return sameModel;
+	const fast = curatedModel(selected, available, MODEL_PRIO.smol);
+	const comprehensive = curatedModel(selected, available, MODEL_PRIO.slow);
+	return {
+		...sameModel,
+		smol: selector(fast),
+		tiny: selector(fast),
+		slow: selector(comprehensive),
+		task: selector(comprehensive),
+		commit: selector(comprehensive),
+		plan: selector(comprehensive),
+		advisor: selector(comprehensive),
+	};
+}
+
+/** Return valid saved-preset names for one selected model. */
+export function getModelRolePresetNames(value: unknown, model: Model): string[] {
+	if (!isRecord(value)) return [];
+	const presets = storedPresets(value[selector(model)]);
+	if (!presets) return [];
+	return Object.keys(presets)
+		.filter(name => isModelRolePresetName(name) && isRecord(presets[name]))
+		.sort((a, b) => a.localeCompare(b));
+}
+
+/** Look up a saved preset. Undefined means use OMP's curated default. */
+export function getModelRolePreset(
+	value: unknown,
+	model: Model,
+	name: string | undefined,
+): ModelRolePreset | undefined {
+	if (!name || !isModelRolePresetName(name) || !isRecord(value)) return undefined;
+	const presets = storedPresets(value[selector(model)]);
+	if (!presets || !isRecord(presets[name])) return undefined;
+	return toRolePreset(presets[name]);
+}
+
+/** A model's saved Default, or undefined for OMP's built-in Default. */
+export function getModelRolePresetDefault(value: unknown, model: Model): ModelRolePreset | undefined {
+	if (!isRecord(value)) return undefined;
+	const entry = value[selector(model)];
+	if (!isRecord(entry)) return undefined;
+	const direct = toRolePreset(entry.default);
+	if (direct) return direct;
+	return typeof entry.default === "string" ? getModelRolePreset(value, model, entry.default) : undefined;
+}
+
+/** The named preset selected as Default, if any. Undefined means the Default row. */
+export function getModelRolePresetDefaultName(value: unknown, model: Model): string | undefined {
+	if (!isRecord(value)) return undefined;
+	const entry = value[selector(model)];
+	if (!isRecord(entry) || typeof entry.default !== "string" || !isModelRolePresetName(entry.default)) {
+		return undefined;
+	}
+	return getModelRolePreset(value, model, entry.default) ? entry.default : undefined;
+}
+
+/** Add or replace one named preset while preserving presets for other models. */
+export function saveModelRolePreset(
+	value: unknown,
+	model: Model,
+	name: string,
+	roles: Readonly<Record<string, string | undefined>>,
+): Record<string, unknown> {
+	const next: Record<string, unknown> = isRecord(value) ? { ...value } : {};
+	if (!isModelRolePresetName(name)) return next;
+	const current = next[selector(model)];
+	next[selector(model)] = {
+		...(isRecord(current) ? current : {}),
+		presets: { ...storedPresets(current), [name]: toRolePreset(roles) },
+	};
+	return next;
+}
+
+/** Save the current role assignment map as this model's Default preset. */
+export function saveModelRolePresetDefault(
+	value: unknown,
+	model: Model,
+	roles: Readonly<Record<string, string | undefined>>,
+): Record<string, unknown> {
+	const next: Record<string, unknown> = isRecord(value) ? { ...value } : {};
+	const current = next[selector(model)];
+	next[selector(model)] = {
+		...(isRecord(current) ? current : {}),
+		default: toRolePreset(roles),
+	};
+	return next;
+}
+
+/** Remove a model's saved Default and restore OMP's built-in Default. */
+export function resetModelRolePresetDefault(value: unknown, model: Model): Record<string, unknown> {
+	const next: Record<string, unknown> = isRecord(value) ? { ...value } : {};
+	const current = next[selector(model)];
+	if (isRecord(current)) {
+		const entry = { ...current };
+		delete entry.default;
+		if (isRecord(entry.presets) && Object.keys(entry.presets).length === 0) delete entry.presets;
+		if (Object.keys(entry).length === 0) delete next[selector(model)];
+		else next[selector(model)] = entry;
+	}
+	return next;
+}
+
+/** Select a named preset as Default; undefined restores OMP's built-in Default. */
+export function setModelRolePresetDefault(
+	value: unknown,
+	model: Model,
+	name: string | undefined,
+): Record<string, unknown> {
+	if (name === undefined) return resetModelRolePresetDefault(value, model);
+	const next: Record<string, unknown> = isRecord(value) ? { ...value } : {};
+	if (!isModelRolePresetName(name)) return next;
+	const current = next[selector(model)];
+	const presets = storedPresets(current);
+	if (!presets || !isRecord(presets[name])) return next;
+	next[selector(model)] = { ...(isRecord(current) ? current : {}), default: name };
+	return next;
+}
+
+/** Delete a named preset; deleting the named Default restores OMP's built-in Default. */
+export function deleteModelRolePreset(value: unknown, model: Model, name: string): Record<string, unknown> {
+	const next: Record<string, unknown> = isRecord(value) ? { ...value } : {};
+	if (!isModelRolePresetName(name)) return next;
+	const current = next[selector(model)];
+	const presets = storedPresets(current);
+	if (!isRecord(current) || !presets || !Object.hasOwn(presets, name)) return next;
+	const remaining = { ...presets };
+	delete remaining[name];
+	const entry: Record<string, unknown> = { ...current, presets: remaining };
+	if (entry.default === name) delete entry.default;
+	if (Object.keys(remaining).length === 0) delete entry.presets;
+	if (Object.keys(entry).length === 0) delete next[selector(model)];
+	else next[selector(model)] = entry;
+	return next;
+}

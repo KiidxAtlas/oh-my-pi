@@ -21,6 +21,12 @@ import {
 	resolveAdvisorRoleSelection,
 	resolveModelRoleValue,
 } from "../../config/model-resolver";
+import {
+	deleteModelRolePreset,
+	saveModelRolePreset,
+	saveModelRolePresetDefault,
+	setModelRolePresetDefault,
+} from "../../config/model-role-presets";
 import { getRoleInfo } from "../../config/model-roles";
 import { settings } from "../../config/settings";
 import type { disableProvider as DisableProvider, enableProvider as EnableProvider } from "../../discovery";
@@ -1097,6 +1103,8 @@ export class SelectorController {
 									selector,
 									thinkingLevel: isAuto ? ThinkingLevel.Inherit : concreteThinking,
 									persist: targetScope === "global",
+									scope: targetScope,
+									modelRolePreset: { kind: "on-select" },
 								});
 								if (!switched) return;
 								if (targetScope === "project") {
@@ -1212,6 +1220,81 @@ export class SelectorController {
 						releaseDefaultMutation?.();
 						hub?.refreshAfterExternalMutation();
 					}
+				},
+				onApplyPreset: async (model, name, applyOptions) => {
+					const releaseDefaultMutation = await this.#acquireDefaultRoleMutation();
+					try {
+						const { switched } = await this.ctx.session.setModel(model, "default", {
+							selector: `${model.provider}/${model.id}`,
+							persist: true,
+							scope: this.ctx.settings.get("modelRoleStorage"),
+							modelRolePreset: applyOptions?.useBuiltInDefault
+								? {
+										kind: "built-in-default",
+										replaceUnsetRoles: applyOptions.replaceUnsetRoles,
+									}
+								: name === undefined
+									? {
+											kind: "configured-default",
+											replaceUnsetRoles: applyOptions?.replaceUnsetRoles,
+										}
+									: {
+											kind: "named",
+											name,
+											replaceUnsetRoles: applyOptions?.replaceUnsetRoles,
+										},
+						});
+						if (!switched) return false;
+						this.ctx.statusLine.invalidate();
+						this.ctx.updateEditorBorderColor();
+						this.ctx.showStatus(`${model.id} applied preset: ${name ?? "Default"}`);
+						return true;
+					} catch (error) {
+						this.ctx.showError(error instanceof Error ? error.message : String(error));
+						return false;
+					} finally {
+						releaseDefaultMutation();
+						hub?.refreshAfterExternalMutation();
+					}
+				},
+				onSavePreset: (model, name) => {
+					this.ctx.settings.set(
+						"modelRolePresets",
+						saveModelRolePreset(
+							this.ctx.settings.get("modelRolePresets"),
+							model,
+							name,
+							this.ctx.settings.getModelRoles(),
+						),
+					);
+					this.ctx.showStatus(`Saved ${model.id} preset: ${name}`);
+				},
+				onSetDefaultPreset: (model, name) => {
+					this.ctx.settings.set(
+						"modelRolePresets",
+						setModelRolePresetDefault(this.ctx.settings.get("modelRolePresets"), model, name),
+					);
+					this.ctx.showStatus(`${model.id} default preset: ${name ?? "Default"}`);
+				},
+				onSaveActivePreset: (model, name, automatic) => {
+					const presets = this.ctx.settings.get("modelRolePresets");
+					const roles = this.ctx.settings.getModelRoles();
+					this.ctx.settings.set(
+						"modelRolePresets",
+						name === undefined
+							? saveModelRolePresetDefault(presets, model, roles)
+							: saveModelRolePreset(presets, model, name, roles),
+					);
+					this.ctx.showStatus(
+						`${automatic ? "Updated" : "Saved"} ${model.id} ${name === undefined ? "Default preset" : `preset: ${name}`}`,
+					);
+				},
+				onDeletePreset: (model, name) => {
+					this.ctx.settings.set(
+						"modelRolePresets",
+						deleteModelRolePreset(this.ctx.settings.get("modelRolePresets"), model, name),
+					);
+					this.ctx.showStatus(`Deleted ${model.id} preset: ${name}`);
 				},
 				onFallbackChainChange: (role, chain) => {
 					try {

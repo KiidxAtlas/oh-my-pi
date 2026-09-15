@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, spyOn } from "bun:test";
+import { mkdirSync } from "node:fs";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { type Api, Effort, type Model } from "@oh-my-pi/pi-ai";
@@ -49,8 +50,12 @@ describe("AgentSession model switch auth pre-flight", () => {
 		return model;
 	}
 
-	function makeSession(initialModel: Model<Api>, roles?: Record<string, string>): AgentSession {
-		const settings = Settings.isolated();
+	function makeSession(
+		initialModel: Model<Api>,
+		roles?: Record<string, string>,
+		configuredSettings?: Settings,
+	): AgentSession {
+		const settings = configuredSettings ?? Settings.isolated();
 		if (roles) {
 			for (const role in roles) settings.setModelRole(role, roles[role]);
 		}
@@ -86,6 +91,276 @@ describe("AgentSession model switch auth pre-flight", () => {
 		expect(s.model?.id).toBe(to.id);
 		expect(hasAuthSpy).toHaveBeenCalled();
 		expect(getApiKeySpy).not.toHaveBeenCalled();
+	});
+
+	it("applies saved Defaults with built-in presets disabled without resolving credentials or stripping thinking", async () => {
+		const from = modelOrThrow("claude-sonnet-4-5");
+		const to = modelOrThrow("claude-sonnet-4-6");
+		const smolSelector = `${from.provider}/${from.id}:low`;
+		const settings = Settings.isolated({
+			modelRolePresets: {
+				applyOnSelect: false,
+				[`${to.provider}/${to.id}`]: {
+					default: { smol: smolSelector },
+				},
+			},
+		});
+		const s = makeSession(from, undefined, settings);
+		const getApiKeySpy = spyOn(registry, "getApiKey");
+		spies.push(getApiKeySpy);
+
+		await s.setModel(to, "default", {
+			persist: true,
+			modelRolePreset: { kind: "on-select" },
+		});
+
+		expect(settings.getModelRole("smol")).toBe(smolSelector);
+		expect(settings.getGlobalModelRole("smol")).toBe(smolSelector);
+		expect(settings.getProjectModelRole("smol")).toBeUndefined();
+		expect(getApiKeySpy).not.toHaveBeenCalled();
+	});
+
+	it("preserves supporting roles when built-in presets are disabled and no saved Default exists", async () => {
+		const from = modelOrThrow("claude-sonnet-4-5");
+		const to = modelOrThrow("claude-sonnet-4-6");
+		const smolSelector = `${from.provider}/${from.id}`;
+		const settings = Settings.isolated({
+			modelRolePresets: {
+				applyOnSelect: false,
+				keepRolesWhenUnset: false,
+			},
+		});
+		settings.setModelRole("smol", smolSelector);
+		const s = makeSession(from, undefined, settings);
+
+		await s.setModel(to, "default", {
+			persist: true,
+			modelRolePreset: { kind: "on-select" },
+		});
+
+		expect(settings.getModelRole("smol")).toBe(smolSelector);
+	});
+
+	it("does not apply built-in roles when resetting an empty Default with built-in presets disabled", async () => {
+		const from = modelOrThrow("claude-sonnet-4-5");
+		const to = modelOrThrow("claude-sonnet-4-6");
+		const retained = `${from.provider}/${from.id}`;
+		const settings = Settings.isolated({
+			modelRolePresets: { applyOnSelect: false, keepRolesWhenUnset: false },
+		});
+		settings.setModelRole("smol", retained);
+		const s = makeSession(from, undefined, settings);
+
+		await s.setModel(to, "default", {
+			modelRolePreset: { kind: "configured-default", replaceUnsetRoles: true },
+		});
+
+		expect(settings.getModelRole("smol")).toBe(retained);
+	});
+
+	it("disables automatic preset loading while allowing explicit application", async () => {
+		const from = modelOrThrow("claude-sonnet-4-5");
+		const to = modelOrThrow("claude-sonnet-4-6");
+		const original = `${from.provider}/${from.id}`;
+		const saved = `${to.provider}/${to.id}:low`;
+		const settings = Settings.isolated({
+			modelRolePresets: {
+				autoLoad: false,
+				applyOnSelect: true,
+				keepRolesWhenUnset: false,
+				[`${to.provider}/${to.id}`]: { default: { smol: saved } },
+			},
+		});
+		settings.setModelRole("smol", original);
+		const s = makeSession(from, undefined, settings);
+		await s.setModel(to, "default", { modelRolePreset: { kind: "on-select" } });
+		expect(settings.getModelRole("smol")).toBe(original);
+		await s.setModel(from, "default", { modelRolePreset: { kind: "on-select" } });
+		expect(settings.getModelRole("smol")).toBe(original);
+		await s.setModel(to, "default", { modelRolePreset: { kind: "configured-default" } });
+		expect(settings.getModelRole("smol")).toBe(saved);
+	});
+
+	it("loads and clears automatic presets only in the project layer, preserving global fallbacks across projects", async () => {
+		const from = modelOrThrow("claude-sonnet-4-5");
+		const to = modelOrThrow("claude-sonnet-4-6");
+		const original = `${from.provider}/${from.id}`;
+		const selected = `${to.provider}/${to.id}`;
+		const saved = `${selected}:low`;
+		const root = path.join(sharedDir.path(), "project-presets");
+		const cwd = path.join(root, "project");
+		const otherCwd = path.join(root, "other");
+		mkdirSync(cwd, { recursive: true });
+		mkdirSync(otherCwd, { recursive: true });
+		const settings = await Settings.loadIsolated({
+			cwd,
+			agentDir: path.join(root, "agent"),
+			overrides: {
+				modelRoleStorage: "project",
+				modelRolePresets: {
+					keepRolesWhenUnset: false,
+					[selected]: { default: { smol: saved } },
+				},
+			},
+		});
+		settings.setModelRole("default", original);
+		settings.setModelRole("smol", original);
+		settings.setModelRole("slow", original);
+		settings.setProjectModelRole("slow", `${selected}:high`);
+		const s = makeSession(from, undefined, settings);
+
+		try {
+			await s.setModel(to, "default", { persist: true, modelRolePreset: { kind: "on-select" } });
+			expect(s.model?.id).toBe(to.id);
+			expect(settings.getProjectModelRole("default")).toBe(selected);
+			expect(settings.getProjectModelRole("smol")).toBe(saved);
+			expect(settings.getProjectModelRole("slow")).toBeUndefined();
+			expect(settings.getModelRole("slow")).toBe(original);
+			for (const role of ["default", "smol", "slow"]) {
+				expect(settings.getGlobalModelRole(role)).toBe(original);
+			}
+
+			await settings.reloadForCwd(otherCwd);
+			expect(settings.getModelRole("default")).toBe(original);
+			expect(settings.getModelRole("smol")).toBe(original);
+			expect(settings.getModelRole("slow")).toBe(original);
+			await settings.reloadForCwd(cwd);
+			expect(settings.getModelRole("default")).toBe(selected);
+			expect(settings.getModelRole("smol")).toBe(saved);
+			expect(settings.getModelRole("slow")).toBe(original);
+		} finally {
+			await settings.flush();
+		}
+	});
+
+	it("applies explicit project presets over runtime choices and restores those choices when leaving the project", async () => {
+		const from = modelOrThrow("claude-sonnet-4-5");
+		const to = modelOrThrow("claude-sonnet-4-6");
+		const original = `${from.provider}/${from.id}`;
+		const selected = `${to.provider}/${to.id}`;
+		const root = path.join(sharedDir.path(), "runtime-presets");
+		const cwd = path.join(root, "project");
+		const otherCwd = path.join(root, "other");
+		mkdirSync(cwd, { recursive: true });
+		mkdirSync(otherCwd, { recursive: true });
+		const settings = await Settings.loadIsolated({
+			cwd,
+			agentDir: path.join(root, "agent"),
+			overrides: {
+				modelRoleStorage: "project",
+				modelRoles: { default: original, smol: `${original}:high`, slow: `${original}:low` },
+				modelRolePresets: {
+					autoLoad: false,
+					[selected]: { presets: { Work: { smol: `${selected}:low` } } },
+				},
+			},
+		});
+		settings.setModelRole("slow", original);
+		// Restore the process override after seeding the global fallback.
+		settings.overrideModelRoles({ default: original, smol: `${original}:high`, slow: `${original}:low` });
+		const s = makeSession(from, undefined, settings);
+
+		try {
+			await s.setModel(to, "default", {
+				persist: true,
+				modelRolePreset: { kind: "named", name: "Work", replaceUnsetRoles: true },
+			});
+			expect(s.model?.id).toBe(to.id);
+			expect(settings.getModelRole("default")).toBe(selected);
+			expect(settings.getModelRole("smol")).toBe(`${selected}:low`);
+			expect(settings.getModelRole("slow")).toBe(original);
+			expect(settings.getGlobalModelRole("default")).toBeUndefined();
+			expect(settings.getGlobalModelRole("smol")).toBeUndefined();
+			expect(settings.getGlobalModelRole("slow")).toBe(original);
+
+			await settings.reloadForCwd(otherCwd);
+			expect(settings.getModelRole("default")).toBe(original);
+			expect(settings.getModelRole("smol")).toBe(`${original}:high`);
+			expect(settings.getModelRole("slow")).toBe(`${original}:low`);
+			expect(settings.getProjectModelRole("default")).toBeUndefined();
+			expect(settings.getProjectModelRole("smol")).toBeUndefined();
+		} finally {
+			await settings.flush();
+		}
+	});
+
+	it("persists explicit project presets without switching or overwriting effective overlay roles", async () => {
+		const from = modelOrThrow("claude-sonnet-4-5");
+		const to = modelOrThrow("claude-sonnet-4-6");
+		const original = `${from.provider}/${from.id}`;
+		const selected = `${to.provider}/${to.id}`;
+		const root = path.join(sharedDir.path(), "overlay-presets");
+		const cwd = path.join(root, "project");
+		mkdirSync(cwd, { recursive: true });
+		const overlayPath = path.join(root, "overlay.yml");
+		await Bun.write(overlayPath, `modelRoles:\n  default: ${original}\n  smol: ${original}:high\n`);
+		const settings = await Settings.loadIsolated({
+			cwd,
+			agentDir: path.join(root, "agent"),
+			configFiles: [overlayPath],
+			overrides: {
+				modelRoleStorage: "project",
+				modelRolePresets: { [selected]: { default: { smol: `${selected}:low` } } },
+			},
+		});
+		const s = makeSession(from, undefined, settings);
+		let modelChanged = false;
+		s.subscribe(event => {
+			if (event.type === "model_changed") modelChanged = true;
+		});
+		try {
+			const result = await s.setModel(to, "default", {
+				persist: true,
+				modelRolePreset: { kind: "configured-default" },
+			});
+			expect(result.switched).toBe(false);
+			expect(s.model?.id).toBe(from.id);
+			expect(modelChanged).toBe(false);
+			expect(settings.getProjectModelRole("default")).toBe(selected);
+			expect(settings.getProjectModelRole("smol")).toBe(`${selected}:low`);
+			expect(settings.getGlobalModelRole("default")).toBeUndefined();
+			expect(settings.getGlobalModelRole("smol")).toBeUndefined();
+			expect(settings.getModelRole("default")).toBe(original);
+			expect(settings.getModelRole("smol")).toBe(`${original}:high`);
+			expect(settings.getModelRoleProvenance("default")).toBe("overlay");
+			await settings.flush();
+			await settings.reloadFromDisk();
+			expect(settings.getProjectModelRole("default")).toBe(selected);
+			expect(settings.getProjectModelRole("smol")).toBe(`${selected}:low`);
+			expect(settings.getModelRole("default")).toBe(original);
+		} finally {
+			await settings.flush();
+		}
+	});
+
+	it("keeps captured project runtime roles authoritative when explicitly editing a global preset", async () => {
+		const from = modelOrThrow("claude-sonnet-4-5");
+		const to = modelOrThrow("claude-sonnet-4-6");
+		const original = `${from.provider}/${from.id}`;
+		const selected = `${to.provider}/${to.id}`;
+		const settings = Settings.isolated({
+			modelRoleStorage: "project",
+			modelRoles: { default: selected, smol: selected, slow: selected },
+			modelRolePresets: { [selected]: { default: { smol: `${selected}:low` } } },
+		});
+		for (const role of ["default", "smol", "slow"]) settings.setProjectModelRole(role, original);
+		const s = makeSession(from, undefined, settings);
+
+		const result = await s.setModel(to, "default", {
+			persist: true,
+			scope: "global",
+			modelRolePreset: { kind: "configured-default", replaceUnsetRoles: true },
+		});
+		expect(result.switched).toBe(false);
+		expect(s.model?.id).toBe(from.id);
+		expect(settings.getGlobalModelRole("default")).toBe(selected);
+		expect(settings.getGlobalModelRole("smol")).toBe(`${selected}:low`);
+		expect(settings.getGlobalModelRole("slow")).toBeUndefined();
+		for (const role of ["default", "smol", "slow"]) {
+			expect(settings.getProjectModelRole(role)).toBe(original);
+			expect(settings.getModelRole(role)).toBe(original);
+			expect(settings.isProjectModelRoleRuntimeOverrideActive(role)).toBe(true);
+		}
 	});
 
 	it("cycles role models without invoking the resolver", async () => {
