@@ -922,11 +922,11 @@ describe("resolveModelRoleValue", () => {
 		expect(result.explicitThinkingLevel).toBe(true);
 	});
 
-	test.each(["nanogpt/NanoGPT/Coding-Router:LOW", "NanoGPT/NanoGPT/Coding-Router:LOW"])(
+	test.each(["nanogpt/coding-router:low", "NanoGPT/Coding-Router:LOW", "coding-router:low", "CODING-ROUTER:LOW"])(
 		"preserves literal selector %s while applying an outer alias effort",
 		selector => {
 			const literal = buildModel({
-				id: "NanoGPT/Coding-Router:LOW",
+				id: "coding-router:low",
 				name: "Coding Router Low",
 				api: "openai-completions",
 				provider: "nanogpt",
@@ -942,7 +942,7 @@ describe("resolveModelRoleValue", () => {
 
 			const result = resolveModelRoleValue("@smol:high", [literal], { settings });
 
-			expect(result.model?.id).toBe("NanoGPT/Coding-Router:LOW");
+			expect(result.model?.id).toBe("coding-router:low");
 			expect(result.thinkingLevel).toBe(Effort.High);
 		},
 	);

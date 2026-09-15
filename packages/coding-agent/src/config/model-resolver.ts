@@ -1484,10 +1484,18 @@ export function resolveModelRoleValue(
 	}
 
 	const literalModelPatterns = new Map<string, string | undefined>();
+	const addLiteralModelPattern = (pattern: string, canonical: string): void => {
+		const key = pattern.toLowerCase();
+		if (!literalModelPatterns.has(key)) {
+			literalModelPatterns.set(key, canonical);
+		} else if (literalModelPatterns.get(key) !== canonical) {
+			literalModelPatterns.set(key, undefined);
+		}
+	};
 	for (const model of availableModels) {
 		const selector = formatModelString(model);
-		const key = selector.toLowerCase();
-		literalModelPatterns.set(key, literalModelPatterns.has(key) ? undefined : selector);
+		addLiteralModelPattern(selector, selector);
+		addLiteralModelPattern(model.id, model.id);
 	}
 	const effectivePatterns = resolveConfiguredModelPatterns(normalized, options?.roleLookup ?? options?.settings, {
 		normalizeLiteralModelPattern: pattern => literalModelPatterns.get(pattern.trim().toLowerCase()),
