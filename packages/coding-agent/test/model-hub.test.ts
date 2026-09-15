@@ -323,6 +323,40 @@ describe("ModelHub", () => {
 			});
 		});
 
+		test("keeps the Default row separate from a named default pointer", async () => {
+			const model = makeModel("test", "primary");
+			const settings = Settings.isolated({
+				modelRoles: { default: "test/primary" },
+				modelRolePresets: {
+					applyOnSelect: false,
+					"test/primary": {
+						presets: { quality: { smol: "test/quality" } },
+						default: "quality",
+					},
+				},
+			});
+			const onApplyPreset = vi.fn(() => true);
+			const { hub } = createHub({
+				models: [model],
+				scoped: true,
+				settings,
+				callbacks: { onApplyPreset },
+			});
+
+			hub.handleInput(UP); // All models → Roles.
+			hub.handleInput("\n"); // Enter role rows.
+			hub.handleInput(UP); // Save preset → named preset → Default row.
+			hub.handleInput(UP);
+			hub.handleInput(UP);
+			hub.handleInput("\n"); // Apply the unnamed Default row.
+
+			await Promise.resolve();
+			expect(onApplyPreset).toHaveBeenCalledWith(model, undefined, {
+				replaceUnsetRoles: false,
+				useBuiltInDefault: true,
+			});
+		});
+
 		test("failed preset application keeps subsequent saves on the previous active profile", async () => {
 			const model = makeModel("test", "primary");
 			const settings = Settings.isolated({

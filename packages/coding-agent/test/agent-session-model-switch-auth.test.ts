@@ -207,7 +207,7 @@ describe("AgentSession model switch auth pre-flight", () => {
 		expect(s.resolveRoleModelWithThinking("smol").thinkingLevel).toBe(Effort.Low);
 	});
 
-	it("replaces cyclic and unavailable alias targets without using partially applied fallbacks", async () => {
+	it("falls back through built-in priorities for cyclic preset aliases", async () => {
 		const from = modelOrThrow("claude-sonnet-4-5");
 		const to = modelOrThrow("claude-sonnet-4-6");
 		const selected = `${to.provider}/${to.id}`;
@@ -225,10 +225,14 @@ describe("AgentSession model switch auth pre-flight", () => {
 
 		await s.setModel(to, "default", { modelRolePreset: { kind: "configured-default" } });
 
-		for (const role of ["smol", "slow", "vision", "plan"]) {
-			expect(settings.getModelRole(role)).toBe(selected);
-			expect(s.resolveRoleModelWithThinking(role).model?.id).toBe(to.id);
-		}
+		expect(settings.getModelRole("smol")).toBe("@slow");
+		expect(settings.getModelRole("slow")).toBe("@smol");
+		expect(settings.getModelRole("vision")).toBe(selected);
+		expect(settings.getModelRole("plan")).toBe(selected);
+		expect(s.resolveRoleModelWithThinking("smol").model).toBeDefined();
+		expect(s.resolveRoleModelWithThinking("slow").model).toBeDefined();
+		expect(s.resolveRoleModelWithThinking("vision").model?.id).toBe(to.id);
+		expect(s.resolveRoleModelWithThinking("plan").model?.id).toBe(to.id);
 	});
 
 	it.each([true, false])("looks up omitted alias targets with keepRolesWhenUnset=%s", async keepRolesWhenUnset => {

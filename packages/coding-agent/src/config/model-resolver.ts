@@ -1178,6 +1178,43 @@ function rolePriorityDefaults(role: ModelRole): string[] {
 	return normalizeModelPatternList(MODEL_PRIO[key]);
 }
 
+/** Resolve aliases inside a configured pattern list without leaking cycles to model matching. */
+function resolveNestedRolePatterns(
+	value: string,
+	roleDefaults: string[],
+	settings: ModelRoleLookup | undefined,
+	visited: Set<string>,
+	normalizeLiteralModelPattern: ((pattern: string) => string | undefined) | undefined,
+): string[] {
+	const resolved: string[] = [];
+	for (const pattern of normalizeModelPatternList(value)) {
+		const { base: aliasCandidate, level: thinkingLevel } = splitThinkingSuffix(
+			pattern,
+			modelRoleAliasPrefixLength(pattern) ?? LEGACY_MODEL_ROLE_ALIAS_PREFIX.length,
+			MAX_THINKING_SUFFIX_OPTIONS,
+		);
+		const aliasRole = getModelRoleAlias(aliasCandidate, settings);
+		if (!aliasRole) {
+			resolved.push(pattern);
+			continue;
+		}
+		if (visited.has(aliasRole)) {
+			// A configured cycle (e.g. smol = "@slow", slow = "@smol") loops back to a
+			// role already being resolved: substitute the built-in priority chain so
+			// the alias still yields a model instead of collapsing to nothing.
+			resolved.push(
+				...(thinkingLevel
+					? roleDefaults.map(defaultPattern => `${defaultPattern}:${thinkingLevel}`)
+					: roleDefaults),
+			);
+			continue;
+		}
+		const recursed = resolveConfiguredRolePattern(pattern, settings, new Set(visited), normalizeLiteralModelPattern);
+		if (recursed) resolved.push(...recursed);
+	}
+	return resolved;
+}
+
 function resolveDefaultInheritedPatterns(
 	role: ModelRole,
 	configuredDefault: string | undefined,
@@ -1275,7 +1312,7 @@ function resolveConfiguredRolePattern(
 					return level ? roleDefaults.map(defaultPattern => `${defaultPattern}:${level}`) : [];
 				});
 	const resolved = configured
-		? normalizeModelPatternList(configured)
+		? resolveNestedRolePatterns(configured, roleDefaults, settings, visited, normalizeLiteralModelPattern)
 		: fallbackPatterns
 			? fallbackPatterns
 			: isModelRole(role)
@@ -1344,14 +1381,12 @@ export function resolveConfiguredModelPatterns(
 	const normalizeLiteralModelPattern =
 		options?.normalizeLiteralModelPattern ??
 		(options?.availableModels ? createLiteralModelPatternNormalizer(options.availableModels) : undefined);
-	const expand = (pattern: string, visited: Set<string>): string[] => {
-		const resolved = resolveConfiguredRolePattern(pattern, settings, visited, normalizeLiteralModelPattern);
-		if (!resolved) return [];
-		return resolved.flatMap(value =>
-			resolveExplicitModelRole(value, settings) ? expand(value, new Set(visited)) : [value],
-		);
-	};
-	return patterns.flatMap(pattern => expand(pattern, new Set()));
+	// Alias recursion (and its cycle-to-role-defaults fallback) lives inside
+	// resolveConfiguredRolePattern via resolveNestedRolePatterns, so this only
+	// expands each top-level pattern once.
+	return patterns.flatMap(
+		pattern => resolveConfiguredRolePattern(pattern, settings, new Set(), normalizeLiteralModelPattern) ?? [],
+	);
 }
 export interface AgentModelPatternResolutionOptions {
 	/** Highest-priority request selector, when supplied by a caller. */

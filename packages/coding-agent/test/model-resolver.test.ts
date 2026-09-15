@@ -947,20 +947,21 @@ describe("resolveModelRoleValue", () => {
 		},
 	);
 
-	test("discards cyclic alias branches without poisoning later fallback paths", () => {
+	test("cyclic aliases fall back to the built-in role priority chain", () => {
 		const settings = Settings.isolated({
-			modelRoles: {
-				smol: "@slow",
-				slow: "@smol",
-				plan: "@slow,anthropic/claude-sonnet-4-5:low",
-			},
+			modelRoles: { smol: "@slow", slow: "@smol" },
 		});
 
-		expect(resolveModelRoleValue("@smol", allModels, { settings }).model).toBeUndefined();
-		const result = resolveModelRoleValue("@smol,@plan", allModels, { settings });
-		expect(result.model?.provider).toBe("anthropic");
-		expect(result.model?.id).toBe("claude-sonnet-4-5");
-		expect(result.thinkingLevel).toBe(Effort.Low);
+		// A misconfigured cycle must not leave the role with no model; it resolves
+		// through the built-in priority chain instead of dropping every candidate.
+		const result = resolveModelRoleValue("@smol", allModels, { settings });
+		expect(result.model).toBeDefined();
+		expect(allModels.some(model => model === result.model)).toBe(true);
+
+		// An outer thinking level applied to the alias survives the fallback.
+		const withEffort = resolveModelRoleValue("@smol:high", allModels, { settings });
+		expect(withEffort.model).toBeDefined();
+		expect(withEffort.thinkingLevel).toBe(Effort.High);
 	});
 
 	test("resolves a custom role that references another custom role (#10853)", () => {

@@ -1825,12 +1825,16 @@ export class ModelHubComponent implements Component {
 	/** Activate the requested profile only after its model and roles have been applied. */
 	#applyPreset(model: Model, name: string | undefined, builtInDefault?: boolean, replaceUnsetRoles = false): void {
 		const storedPresets = this.#settings.get("modelRolePresets");
+		// The "Default" row keeps its built-in/empty identity regardless of whether
+		// built-in application is enabled: it must never follow a named-default
+		// pointer (that would reapply the named preset). It resolves to a configured
+		// Default only when an unnamed direct snapshot exists. ModelControls still
+		// re-checks `applyOnSelect` to decide built-in-vs-leave-alone.
 		const useBuiltInDefault =
-			this.#settings.get("modelRolePresets.applyOnSelect") &&
-			(builtInDefault ??
-				(name === undefined &&
-					(getModelRolePresetDefaultName(storedPresets, model) !== undefined ||
-						getModelRolePresetDefault(storedPresets, model) === undefined)));
+			builtInDefault ??
+			(name === undefined &&
+				(getModelRolePresetDefaultName(storedPresets, model) !== undefined ||
+					getModelRolePresetDefault(storedPresets, model) === undefined));
 		const applicationId = ++this.#presetApplicationId;
 		// Preset application awaits a model switch/metadata refresh; block hub input
 		// for its duration (same gate as ordinary assignments) so a supporting-role
