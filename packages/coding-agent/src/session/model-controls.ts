@@ -344,9 +344,17 @@ export class ModelControls {
 			this.#host.settings.get("modelRolePresets.applyOnSelect");
 		if (!savedPreset && !useBuiltInDefault) return;
 		const preset: Readonly<ModelRolePreset> = savedPreset ?? buildDefaultModelRolePreset(model, available);
-		// Built-in roles plus any custom role the preset carries, so a user-defined
-		// role saved into a profile is restored when the profile is applied.
-		const presetRoles = modelRolePresetRoles(preset);
+		// Built-in roles plus any custom role the preset carries. When replacement is
+		// requested, also visit custom roles that only exist in the target scope so an
+		// omitted one is cleared instead of silently surviving.
+		const storedScopeRoles = keepUnsetRoles
+			? undefined
+			: Object.keys(
+					scope === "project"
+						? this.#host.settings.getProjectModelRoles()
+						: this.#host.settings.getGlobalModelRoles(),
+				);
+		const presetRoles = modelRolePresetRoles(preset, storedScopeRoles);
 		const selected = formatModelStringWithRouting(model);
 		const roleLookup = {
 			getModelRole: (role: string): string | undefined => {

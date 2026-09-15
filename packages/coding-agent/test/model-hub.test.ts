@@ -361,6 +361,41 @@ describe("ModelHub", () => {
 			expect(getModelRolePreset(settings.get("modelRolePresets"), model, "quality")?.smol).toBe("test/saved");
 			expect(getModelRolePresetDefault(settings.get("modelRolePresets"), model)?.smol).toBe("test/edited");
 		});
+		test("blocks hub input while an async preset application is pending", async () => {
+			const model = makeModel("test", "primary");
+			const settings = Settings.isolated({
+				modelRoles: { default: "test/primary" },
+				modelRolePresets: { "test/primary": { presets: { quality: { slow: "test/primary" } } } },
+			});
+			const applied = Promise.withResolvers<boolean>();
+			const onApplyPreset = vi.fn(() => applied.promise);
+			const onAssign = vi.fn();
+			const { hub } = createHub({
+				models: [model],
+				scoped: true,
+				settings,
+				callbacks: { onApplyPreset, onAssign },
+			});
+
+			hub.handleInput(UP); // All models → Roles.
+			hub.handleInput("\n"); // Dive into role rows on DEFAULT.
+			hub.handleInput(UP); // Save preset.
+			hub.handleInput(UP); // Named quality preset.
+			hub.handleInput("\n"); // Apply it — resolves asynchronously.
+			expect(onApplyPreset).toHaveBeenCalledTimes(1);
+			expect(normalize(hub.render(220))).toContain("Applying model");
+
+			// A role edit while the application is pending must not slip through and be
+			// overwritten by the slower preset write.
+			hub.handleInput("\n");
+			hub.handleInput("\n");
+			expect(onAssign).not.toHaveBeenCalled();
+
+			applied.resolve(true);
+			await applied.promise;
+			await Promise.resolve();
+			expect(normalize(hub.render(220))).not.toContain("Applying model");
+		});
 
 		test("switching default models does not auto-save carried roles over the destination preset", async () => {
 			const first = makeModel("test", "first");

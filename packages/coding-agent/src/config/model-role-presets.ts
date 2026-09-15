@@ -19,12 +19,19 @@ export function isModelRolePresetName(value: string): boolean {
 	return value.toLowerCase() !== "default" && MODEL_ROLE_PRESET_NAME_PATTERN.test(value);
 }
 
-/** Roles a preset assigns: its built-in set plus any custom roles it carries. */
-export function modelRolePresetRoles(preset: ModelRolePreset | undefined): string[] {
+/**
+ * Roles a preset assigns: its built-in set, any custom roles it carries, and any
+ * `extraRoleKeys` a caller must also visit — replacement semantics pass the
+ * target scope's stored role keys so a custom role omitted from the incoming
+ * preset is still cleared.
+ */
+export function modelRolePresetRoles(preset: ModelRolePreset | undefined, extraRoleKeys?: Iterable<string>): string[] {
 	const roles: string[] = [...MODEL_PRESET_ROLES];
-	for (const role in preset) {
+	const add = (role: string): void => {
 		if (role !== "default" && !roles.includes(role)) roles.push(role);
-	}
+	};
+	for (const role in preset) add(role);
+	if (extraRoleKeys) for (const role of extraRoleKeys) add(role);
 	return roles;
 }
 

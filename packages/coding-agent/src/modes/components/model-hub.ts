@@ -713,9 +713,13 @@ export class ModelHubComponent implements Component {
 			const keepUnsetRoles = this.#settings.get("modelRolePresets.keepRolesWhenUnset");
 			const selected = formatModelStringWithRouting(defaultModel);
 			const availableForResolution = [...availableModels];
-			// Built-in roles plus any custom role the active profile carries, so a
-			// saved custom assignment participates in both lookup and dirty state.
-			const profileRoles = modelRolePresetRoles(activeProfile);
+			// Built-in roles plus custom roles from the active profile. Under replacement
+			// semantics, also fold in custom roles stored in the target scope so a role
+			// the preset omits is compared (and cleared) the same as an application would.
+			const profileRoles = modelRolePresetRoles(
+				activeProfile,
+				keepUnsetRoles ? undefined : Object.keys(storedRoles),
+			);
 			const roleLookup: ModelRoleLookup = {
 				getModelRole: role => {
 					if (role === "default") return selected;
@@ -1828,22 +1832,21 @@ export class ModelHubComponent implements Component {
 					(getModelRolePresetDefaultName(storedPresets, model) !== undefined ||
 						getModelRolePresetDefault(storedPresets, model) === undefined)));
 		const applicationId = ++this.#presetApplicationId;
-		void Promise.resolve(
-			this.#callbacks.onApplyPreset?.(model, name, {
-				replaceUnsetRoles,
-				useBuiltInDefault,
-			}),
-		)
-			.then(applied => {
-				if (applied === false || applicationId !== this.#presetApplicationId) return;
+		// Preset application awaits a model switch/metadata refresh; block hub input
+		// for its duration (same gate as ordinary assignments) so a supporting-role
+		// edit cannot land first and then be overwritten by the slower preset write.
+		this.#finishAssignment(
+			this.#callbacks.onApplyPreset?.(model, name, { replaceUnsetRoles, useBuiltInDefault }),
+			() => {
+				if (applicationId !== this.#presetApplicationId) return;
 				this.#refreshAfterMutation();
 				const current = this.#roles.default?.model;
 				if (current?.provider !== model.provider || current.id !== model.id) return;
 				this.#activePreset = { model, name, useBuiltInDefault };
 				this.#activePresetManuallyDirty = false;
 				this.#refreshAfterMutation();
-			})
-			.catch(error => logger.warn("Model role preset application failed", { error }));
+			},
+		);
 	}
 
 	#isActivePresetTarget(row: Extract<RolesRow, { kind: "preset" }>): boolean {

@@ -248,6 +248,27 @@ describe("AgentSession model switch auth pre-flight", () => {
 		expect(settings.getModelRole("smol")).toBe(keepRolesWhenUnset ? "@vision" : selected);
 		expect(s.resolveRoleModelWithThinking("smol").model?.id).toBe(keepRolesWhenUnset ? from.id : to.id);
 	});
+	it.each([true, false])(
+		"honors keepRolesWhenUnset=%s for a custom role omitted by the preset",
+		async keepRolesWhenUnset => {
+			const from = modelOrThrow("claude-sonnet-4-5");
+			const to = modelOrThrow("claude-sonnet-4-6");
+			const original = `${from.provider}/${from.id}`;
+			const selected = `${to.provider}/${to.id}`;
+			const settings = Settings.isolated({
+				modelRolePresets: { keepRolesWhenUnset, [selected]: { default: { smol: selected } } },
+			});
+			// A custom role created in the Roles view, absent from the applied preset.
+			settings.setModelRole("reviewer", original);
+			const s = makeSession(from, undefined, settings);
+
+			await s.setModel(to, "default", { modelRolePreset: { kind: "configured-default" } });
+
+			// Replacement clears the omitted custom role; keeping it preserves the edit.
+			expect(settings.getModelRole("reviewer")).toBe(keepRolesWhenUnset ? original : undefined);
+			expect(settings.getModelRole("smol")).toBe(selected);
+		},
+	);
 
 	it.each(["project", "global"] as const)("resolves cleared alias targets in the %s scope", async scope => {
 		const from = modelOrThrow("claude-sonnet-4-5");
