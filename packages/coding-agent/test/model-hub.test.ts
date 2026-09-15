@@ -262,9 +262,10 @@ describe("ModelHub", () => {
 		test("does not mark a preset unsaved when an unavailable assignment falls back to the selected model", () => {
 			const model = makeModel("test", "primary");
 			const settings = Settings.isolated({
-				modelRoles: { default: "test/primary", smol: "test/primary" },
 				modelRolePresets: { "test/primary": { default: { smol: "test/missing" } } },
 			});
+			settings.setModelRole("default", "test/primary");
+			settings.setModelRole("smol", "test/primary");
 			const { hub } = createHub({ models: [model], scoped: true, settings });
 
 			hub.handleInput(UP); // All models → Roles.
@@ -273,9 +274,9 @@ describe("ModelHub", () => {
 
 		test("disabling built-ins clears the stale Default comparison and reset selection", () => {
 			const model = makeModel("test", "primary");
-			const settings = Settings.isolated({
-				modelRoles: { default: "test/primary", smol: "test/existing" },
-			});
+			const settings = Settings.isolated();
+			settings.setModelRole("default", "test/primary");
+			settings.setModelRole("smol", "test/existing");
 			settings.set("modelRolePresets.applyOnSelect", true);
 			const onApplyPreset = vi.fn();
 			const { hub } = createHub({ models: [model], scoped: true, settings, callbacks: { onApplyPreset } });

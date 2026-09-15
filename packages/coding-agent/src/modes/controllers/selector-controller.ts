@@ -1193,7 +1193,9 @@ export class SelectorController {
 					try {
 						const currentDefault = resolveModelRoleValue(
 							this.ctx.settings.getModelRole("default"),
-							this.ctx.session.getAvailableModels(),
+							this.ctx.session.scopedModels.length > 0
+								? this.ctx.session.scopedModels.map(scoped => scoped.model)
+								: this.ctx.session.getAvailableModels(),
 							{ settings: this.ctx.settings },
 						);
 						const configuredThinking = currentDefault.explicitThinkingLevel

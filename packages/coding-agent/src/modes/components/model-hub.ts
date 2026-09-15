@@ -687,9 +687,10 @@ export class ModelHubComponent implements Component {
 		if (defaultModel) {
 			const storedPresets = this.#settings.get("modelRolePresets");
 			const defaultName = getModelRolePresetDefaultName(storedPresets, defaultModel);
-			const currentRoles = this.#settings.getModelRoles();
-			const projectRoles =
-				this.#settings.get("modelRoleStorage") === "project" ? this.#settings.getProjectModelRoles() : currentRoles;
+			const storedRoles =
+				this.#settings.get("modelRoleStorage") === "project"
+					? this.#settings.getProjectModelRoles()
+					: this.#settings.getGlobalModelRoles();
 			if (!this.#activePreset) {
 				const configuredDefault = getModelRolePresetDefault(storedPresets, defaultModel);
 				const useBuiltInDefault =
@@ -737,11 +738,11 @@ export class ModelHubComponent implements Component {
 			const rolesDifferFromPreset =
 				active !== undefined &&
 				(appliedProfile === undefined
-					? MODEL_PRESET_ROLES.some(role => projectRoles[role] !== undefined)
+					? MODEL_PRESET_ROLES.some(role => storedRoles[role] !== undefined)
 					: MODEL_PRESET_ROLES.some(role =>
 							appliedProfile[role] === undefined && keepUnsetRoles
 								? false
-								: projectRoles[role] !== appliedProfile[role],
+								: storedRoles[role] !== appliedProfile[role],
 						));
 			this.#activePresetDirty = this.#activePresetManuallyDirty || rolesDifferFromPreset;
 			rows.push({ kind: "preset", name: undefined, model: defaultModel, isDefault: defaultName === undefined });
