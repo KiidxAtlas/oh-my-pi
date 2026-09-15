@@ -703,7 +703,6 @@ export class ModelHubComponent implements Component {
 				this.#activePreset = { model: defaultModel, name: defaultName, useBuiltInDefault };
 			}
 			const active = this.#activePreset;
-			if (!this.#settings.get("modelRolePresets.applyOnSelect")) active.useBuiltInDefault = false;
 			const activeProfile = active?.useBuiltInDefault
 				? buildDefaultModelRolePreset(defaultModel, availableModels)
 				: active?.name === undefined
@@ -1077,7 +1076,7 @@ export class ModelHubComponent implements Component {
 	 */
 	#notePresetRoleEdit(role: string, scope?: ModelRoleSelectionScope): () => void {
 		const presetScope = this.#settings.get("modelRoleStorage") === "project" ? "project" : "global";
-		const editsActivePresetScope = role !== "default" && (scope ?? "global") === presetScope;
+		const editsActivePresetScope = role !== "default" && (scope ?? presetScope) === presetScope;
 		const active = this.#activePreset;
 		if (editsActivePresetScope && active) this.#activePresetManuallyDirty = true;
 		return () => {
