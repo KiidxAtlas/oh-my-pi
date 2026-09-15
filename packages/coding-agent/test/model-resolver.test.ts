@@ -2071,6 +2071,25 @@ describe("expandRoleAlias", () => {
 		expect(expandRoleAlias("@vision", settings)).toBe("openai/gpt-4o");
 	});
 
+	test("preserves literal effort-like IDs when expanding a public alias with available models", () => {
+		const literal = buildModel({
+			id: "coding-router:low",
+			name: "Coding Router Low",
+			api: "openai-completions",
+			provider: "nanogpt",
+			baseUrl: "https://api.example.test/v1",
+			reasoning: true,
+			thinking: { mode: "effort", efforts: [Effort.Low, Effort.High] },
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128_000,
+			maxTokens: 4096,
+		});
+		const settings = Settings.isolated({ modelRoles: { smol: "coding-router:low" } });
+
+		expect(expandRoleAlias("@smol:high", settings, [literal])).toBe("coding-router:low:high");
+	});
+
 	test("keeps @vision alias when vision role is unset", () => {
 		const settings = Settings.isolated();
 		settings.setModelRole("default", "anthropic/claude-sonnet-4-5");
