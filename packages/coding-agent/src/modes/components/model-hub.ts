@@ -1724,7 +1724,7 @@ export class ModelHubComponent implements Component {
 	}
 
 	/** Activate the requested profile only after its model and roles have been applied. */
-	#applyPreset(model: Model, name: string | undefined, builtInDefault?: boolean): void {
+	#applyPreset(model: Model, name: string | undefined, builtInDefault?: boolean, replaceUnsetRoles = false): void {
 		const storedPresets = this.#settings.get("modelRolePresets");
 		const useBuiltInDefault =
 			this.#settings.get("modelRolePresets.applyOnSelect") &&
@@ -1735,7 +1735,7 @@ export class ModelHubComponent implements Component {
 		const applicationId = ++this.#presetApplicationId;
 		void Promise.resolve(
 			this.#callbacks.onApplyPreset?.(model, name, {
-				replaceUnsetRoles: true,
+				replaceUnsetRoles,
 				useBuiltInDefault,
 			}),
 		)
@@ -1782,7 +1782,7 @@ export class ModelHubComponent implements Component {
 			this.#activePresetManuallyDirty = false;
 			return true;
 		}
-		this.#applyPreset(active.model, active.name, active.useBuiltInDefault);
+		this.#applyPreset(active.model, active.name, active.useBuiltInDefault, true);
 		return true;
 	}
 

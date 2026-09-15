@@ -305,7 +305,7 @@ describe("ModelHub", () => {
 			hub.handleInput("\n");
 
 			expect(onApplyPreset).toHaveBeenCalledWith(model, "quality", {
-				replaceUnsetRoles: true,
+				replaceUnsetRoles: false,
 				useBuiltInDefault: false,
 			});
 		});

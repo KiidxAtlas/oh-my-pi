@@ -116,8 +116,27 @@ describe("AgentSession model switch auth pre-flight", () => {
 
 		expect(settings.getModelRole("smol")).toBe(smolSelector);
 		expect(settings.getGlobalModelRole("smol")).toBe(smolSelector);
+
 		expect(settings.getProjectModelRole("smol")).toBeUndefined();
 		expect(getApiKeySpy).not.toHaveBeenCalled();
+	});
+	it("preserves omitted roles when explicitly applying a partial saved preset", async () => {
+		const from = modelOrThrow("claude-sonnet-4-5");
+		const to = modelOrThrow("claude-sonnet-4-6");
+		const existingSlow = `${from.provider}/${from.id}`;
+		const settings = Settings.isolated({
+			modelRolePresets: {
+				keepRolesWhenUnset: true,
+				[`${to.provider}/${to.id}`]: { default: { smol: `${to.provider}/${to.id}:low` } },
+			},
+		});
+		settings.setModelRole("slow", existingSlow);
+		const s = makeSession(from, undefined, settings);
+
+		await s.setModel(to, "default", { modelRolePreset: { kind: "configured-default" } });
+
+		expect(settings.getModelRole("smol")).toBe(`${to.provider}/${to.id}:low`);
+		expect(settings.getModelRole("slow")).toBe(existingSlow);
 	});
 
 	it.each(["anthropic/missing-old-slow", "anthropic/claude-sonnet-4-6"])(
