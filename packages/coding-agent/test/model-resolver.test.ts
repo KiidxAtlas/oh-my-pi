@@ -1521,6 +1521,19 @@ describe("resolveCliModel", () => {
 		expect(suffixed.model).toBe(exactModel);
 		expect(suffixed.thinkingLevel).toBe(Effort.High);
 	});
+	test("returns literal effort-like ids in the configured patterns it reports", () => {
+		// The deferred startup path prefers `configuredPatterns` over the resolved
+		// model, so a rewritten `…:high` pattern would select a different model
+		// after discovery than this call just resolved.
+		const registry = { getAll: () => mockMaxSuffixModels, getAvailable: () => mockMaxSuffixModels };
+		const settings = Settings.isolated({ modelRoles: { smol: "nanogpt/coding-router:max" } });
+
+		const result = resolveCliModel({ cliModel: "@smol:high", modelRegistry: registry, settings });
+
+		expect(result.model?.id).toBe("coding-router:max");
+		expect(result.thinkingLevel).toBe(Effort.High);
+		expect(result.configuredPatterns).toEqual(["nanogpt/coding-router:max:high"]);
+	});
 
 	test("configured role beats an unauthenticated catalog id collision (#6508)", () => {
 		// A bundled `cursor/default` model has the bare id `default`, which collides

@@ -161,6 +161,19 @@ describe("saved model role presets", () => {
 		expect(getModelRolePreset(malformed, opus, name)).toEqual(cheapRoles);
 		expect(saveModelRolePreset(saved, opus, "bad/name", qualityRoles)).toEqual(saved);
 	});
+	test("round-trips a user-defined role alongside the built-in roles", () => {
+		// A custom role created in the Roles view is part of the saved profile;
+		// dropping it made auto-save clear the unsaved marker while the assignment
+		// could never be restored by reapplying the preset.
+		const roles = { ...cheapRoles, reviewer: "anthropic/claude-opus-5", default: "anthropic/claude-opus-5" };
+		const named = saveModelRolePreset({}, opus, "cheap", roles);
+		expect(getModelRolePreset(named, opus, "cheap")).toEqual({
+			smol: "anthropic/claude-haiku-4-5",
+			reviewer: "anthropic/claude-opus-5",
+		});
+		const asDefault = saveModelRolePresetDefault(named, opus, roles);
+		expect(getModelRolePresetDefault(asDefault, opus)?.reviewer).toBe("anthropic/claude-opus-5");
+	});
 
 	test("updates and deletes names without mutating inputs or other models and options", () => {
 		const other = model("other-provider", opus.id);

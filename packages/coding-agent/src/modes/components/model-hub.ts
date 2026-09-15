@@ -36,7 +36,7 @@ import {
 	getModelRolePresetDefaultName,
 	getModelRolePresetNames,
 	isModelRolePresetName,
-	MODEL_PRESET_ROLES,
+	modelRolePresetRoles,
 } from "../../config/model-role-presets";
 import {
 	filterAvailableModelsByEnabledPatterns,
@@ -713,10 +713,13 @@ export class ModelHubComponent implements Component {
 			const keepUnsetRoles = this.#settings.get("modelRolePresets.keepRolesWhenUnset");
 			const selected = formatModelStringWithRouting(defaultModel);
 			const availableForResolution = [...availableModels];
+			// Built-in roles plus any custom role the active profile carries, so a
+			// saved custom assignment participates in both lookup and dirty state.
+			const profileRoles = modelRolePresetRoles(activeProfile);
 			const roleLookup: ModelRoleLookup = {
 				getModelRole: role => {
 					if (role === "default") return selected;
-					const presetRole = MODEL_PRESET_ROLES.find(candidate => candidate === role);
+					const presetRole = profileRoles.includes(role) ? role : undefined;
 					if (presetRole && activeProfile?.[presetRole] !== undefined) return activeProfile[presetRole];
 					if (!keepUnsetRoles && presetRole) {
 						return presetScope === "project" ? this.#settings.getGlobalModelRole(role) : undefined;
@@ -730,7 +733,7 @@ export class ModelHubComponent implements Component {
 				activeProfile === undefined
 					? undefined
 					: (Object.fromEntries(
-							MODEL_PRESET_ROLES.map(role => {
+							profileRoles.map(role => {
 								const value = activeProfile[role];
 								if (!value) return [role, undefined];
 								const candidate = resolveModelRoleValue(value, availableForResolution, {
@@ -743,8 +746,8 @@ export class ModelHubComponent implements Component {
 			const rolesDifferFromPreset =
 				active !== undefined &&
 				(appliedProfile === undefined
-					? MODEL_PRESET_ROLES.some(role => storedRoles[role] !== undefined)
-					: MODEL_PRESET_ROLES.some(role =>
+					? profileRoles.some(role => storedRoles[role] !== undefined)
+					: profileRoles.some(role =>
 							appliedProfile[role] === undefined && keepUnsetRoles
 								? false
 								: storedRoles[role] !== appliedProfile[role],

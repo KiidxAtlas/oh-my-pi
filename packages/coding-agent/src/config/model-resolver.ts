@@ -2140,7 +2140,12 @@ export function resolveCliModel(options: {
 				MAX_THINKING_SUFFIX_OPTIONS,
 			);
 			const configuredRole = getModelRoleAlias(roleAlias, settings);
-			configuredPatterns = resolveConfiguredModelPatterns([roleSelector], settings);
+			// Canonicalize literal effort-like ids against what the registry knows, so
+			// the returned patterns the deferred SDK path prefers name the same model
+			// this call resolved.
+			configuredPatterns = resolveConfiguredModelPatterns([roleSelector], settings, {
+				availableModels: availableModels.length > 0 ? availableModels : allModels,
+			});
 			const availableResolved = resolveModelRoleValue(roleSelector, availableModels, {
 				settings,
 				matchPreferences: preferences,

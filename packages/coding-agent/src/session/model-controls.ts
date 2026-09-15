@@ -17,7 +17,8 @@ import {
 	buildDefaultModelRolePreset,
 	getModelRolePreset,
 	getModelRolePresetDefault,
-	MODEL_PRESET_ROLES,
+	type ModelRolePreset,
+	modelRolePresetRoles,
 } from "../config/model-role-presets";
 import type { ModelRegistry } from "../config/model-registry";
 import {
@@ -342,8 +343,10 @@ export class ModelControls {
 			selection.kind !== "named" &&
 			this.#host.settings.get("modelRolePresets.applyOnSelect");
 		if (!savedPreset && !useBuiltInDefault) return;
-		const preset: Readonly<Partial<Record<string, string>>> =
-			savedPreset ?? buildDefaultModelRolePreset(model, available);
+		const preset: Readonly<ModelRolePreset> = savedPreset ?? buildDefaultModelRolePreset(model, available);
+		// Built-in roles plus any custom role the preset carries, so a user-defined
+		// role saved into a profile is restored when the profile is applied.
+		const presetRoles = modelRolePresetRoles(preset);
 		const selected = formatModelStringWithRouting(model);
 		const roleLookup = {
 			getModelRole: (role: string): string | undefined => {
@@ -351,7 +354,7 @@ export class ModelControls {
 				if (preset[role]) return preset[role];
 				// Match the persisted scope, not runtime/overlay values that may
 				// shadow it. Clearing project roles exposes the global fallback.
-				if (!keepUnsetRoles && MODEL_PRESET_ROLES.some(presetRole => presetRole === role)) {
+				if (!keepUnsetRoles && presetRoles.includes(role)) {
 					return scope === "project" ? this.#host.settings.getGlobalModelRole(role) : undefined;
 				}
 				return scope === "project"
@@ -361,7 +364,7 @@ export class ModelControls {
 		};
 		// Resolve against the complete incoming map before writing anything:
 		// forward aliases and invalid cycles must not depend on role order.
-		const assignments = MODEL_PRESET_ROLES.map(role => {
+		const assignments = presetRoles.map(role => {
 			const value = preset[role];
 			if (!value) return [role, undefined] as const;
 			const candidate = resolveModelRoleValue(value, available, { settings: this.#host.settings, roleLookup }).model;

@@ -1,11 +1,17 @@
 import type { Model } from "@oh-my-pi/pi-ai";
 import { isRecord } from "@oh-my-pi/pi-utils";
+import { isLoopbackUrl } from "../utils/loopback";
 import { formatModelStringWithRouting } from "./model-resolver";
 
-/** Roles replaced when a model preset is applied. The selected model remains the default role. */
+/** Built-in roles a preset always covers. The selected model remains the default role. */
 export const MODEL_PRESET_ROLES = ["smol", "slow", "vision", "plan", "commit", "tiny", "task", "advisor"] as const;
 
-export type ModelRolePreset = Partial<Record<(typeof MODEL_PRESET_ROLES)[number], string>>;
+/**
+ * One saved role profile. Built-in roles are always represented; user-defined
+ * roles created in the Roles view are carried verbatim so saving a preset does
+ * not silently drop them.
+ */
+export type ModelRolePreset = Partial<Record<string, string>>;
 
 const MODEL_ROLE_PRESET_NAME_PATTERN = /^[a-zA-Z][\w -]*$/;
 
@@ -13,32 +19,30 @@ export function isModelRolePresetName(value: string): boolean {
 	return value.toLowerCase() !== "default" && MODEL_ROLE_PRESET_NAME_PATTERN.test(value);
 }
 
+/** Roles a preset assigns: its built-in set plus any custom roles it carries. */
+export function modelRolePresetRoles(preset: ModelRolePreset | undefined): string[] {
+	const roles: string[] = [...MODEL_PRESET_ROLES];
+	for (const role in preset) {
+		if (role !== "default" && !roles.includes(role)) roles.push(role);
+	}
+	return roles;
+}
+
 function toRolePreset(value: unknown): ModelRolePreset | undefined {
 	if (!isRecord(value)) return undefined;
 	const result: ModelRolePreset = {};
-	for (const role of MODEL_PRESET_ROLES) {
-		if (typeof value[role] === "string") result[role] = value[role];
+	// Every configured role except `default` (the preset's own model) round-trips,
+	// so a custom role survives a save/apply cycle.
+	for (const role in value) {
+		if (role === "default") continue;
+		const assignment = value[role];
+		if (typeof assignment === "string") result[role] = assignment;
 	}
 	return result;
 }
 
 function selector(model: Model): string {
 	return `${model.provider}/${model.id}`;
-}
-
-function isLoopbackUrl(value: string): boolean {
-	try {
-		const hostname = new URL(value).hostname.replace(/^\[|\]$/g, "");
-		return (
-			hostname === "::" ||
-			hostname === "::1" ||
-			hostname === "0.0.0.0" ||
-			hostname.startsWith("127.") ||
-			hostname === "localhost"
-		);
-	} catch {
-		return false;
-	}
 }
 
 function storedPresets(value: unknown): Record<string, unknown> | undefined {
