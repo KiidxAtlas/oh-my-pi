@@ -696,12 +696,13 @@ export class ModelHubComponent implements Component {
 					: getModelRolePreset(storedPresets, defaultModel, active.name);
 			const rolesDifferFromPreset =
 				active !== undefined &&
-				activeProfile !== undefined &&
-				MODEL_PRESET_ROLES.some(role =>
-					activeProfile[role] === undefined && this.#settings.get("modelRolePresets.keepRolesWhenUnset")
-						? false
-						: currentRoles[role] !== activeProfile[role],
-				);
+				(activeProfile === undefined
+					? MODEL_PRESET_ROLES.some(role => currentRoles[role] !== undefined)
+					: MODEL_PRESET_ROLES.some(role =>
+							activeProfile[role] === undefined && this.#settings.get("modelRolePresets.keepRolesWhenUnset")
+								? false
+								: currentRoles[role] !== activeProfile[role],
+						));
 			this.#activePresetDirty = this.#activePresetManuallyDirty || rolesDifferFromPreset;
 			rows.push({ kind: "preset", name: undefined, model: defaultModel, isDefault: defaultName === undefined });
 			for (const name of getModelRolePresetNames(storedPresets, defaultModel)) {
@@ -1759,7 +1760,6 @@ export class ModelHubComponent implements Component {
 			row.name === active.name
 		);
 	}
-
 	/** Discard unsaved role edits by restoring the active saved or built-in profile. */
 	#discardActivePreset(target?: { model: Model; name: string | undefined }): boolean {
 		const active = this.#activePreset;
@@ -1771,6 +1771,16 @@ export class ModelHubComponent implements Component {
 				target.name !== active.name)
 		) {
 			return false;
+		}
+		const stored = this.#settings.get("modelRolePresets");
+		const saved =
+			active.name === undefined
+				? getModelRolePresetDefault(stored, active.model)
+				: getModelRolePreset(stored, active.model, active.name);
+		if (!saved && !active.useBuiltInDefault && !this.#settings.get("modelRolePresets.applyOnSelect")) {
+			this.#activePresetDirty = false;
+			this.#activePresetManuallyDirty = false;
+			return true;
 		}
 		this.#applyPreset(active.model, active.name, active.useBuiltInDefault);
 		return true;

@@ -272,14 +272,10 @@ describe("ModelHub", () => {
 			expect(normalize(hub.render(220))).toContain("(unsaved)");
 			settings.set("modelRolePresets.applyOnSelect", false);
 			hub.refreshAfterExternalMutation();
-			expect(normalize(hub.render(220))).not.toContain("(unsaved)");
-			hub.handleInput(UP);
-			hub.handleInput(UP);
+			expect(normalize(hub.render(220))).toContain("(unsaved)");
 			hub.handleInput("x");
-			expect(onApplyPreset).toHaveBeenCalledWith(model, undefined, {
-				replaceUnsetRoles: true,
-				useBuiltInDefault: false,
-			});
+			expect(onApplyPreset).not.toHaveBeenCalled();
+			expect(settings.getModelRole("smol")).toBe("test/existing");
 		});
 
 		test("applies the named preset selected from the roles view", () => {
