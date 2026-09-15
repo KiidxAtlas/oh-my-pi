@@ -1000,6 +1000,7 @@ export async function createSessionManager(
 	cwd: string,
 	activeSettings: Settings = settings,
 	askToMoveSession: SessionPrompt = promptMoveSession,
+	options: { nativeFlagOwnership?: "preliminary" | "resolved" } = {},
 ): Promise<SessionManager | undefined> {
 	if (parsed.fork) {
 		if (parsed.noSession) {
@@ -1017,6 +1018,10 @@ export async function createSessionManager(
 			);
 		}
 		return await SessionManager.forkFrom(match.session.path, cwd, parsed.sessionDir);
+	}
+	if (parsed.noSession && options.nativeFlagOwnership === "preliminary") {
+		normalizeContinueSessionArgs(parsed);
+		return SessionManager.inMemory();
 	}
 
 	if (parsed.noSession) {
@@ -1091,6 +1096,10 @@ export async function createSessionManager(
 	return undefined;
 }
 
+/** Settle session disposal without surfacing a duplicate persistence failure. */
+export async function disposeSessionQuietly(session: AgentSession): Promise<void> {
+	await session.dispose().catch(() => undefined);
+}
 /** Discover SYSTEM.md file if no CLI system prompt was provided */
 function discoverSystemPromptFile(): string | undefined {
 	// Check project-local first (.omp/SYSTEM.md, .pi/SYSTEM.md legacy)

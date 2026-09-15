@@ -108,7 +108,7 @@ export interface ModelHubCallbacks {
 		thinkingLevel: ConfiguredThinkingLevel | undefined,
 		selector: string,
 		scope?: ModelRoleSelectionScope,
-	) => void | Promise<void>;
+	) => void | boolean | Promise<void | boolean>;
 	/** Clear a configured role back to auto-selection. */
 	onUnassign: (role: string, scope?: ModelRoleSelectionScope) => void | Promise<void>;
 	/** Persist a `retry.fallbackChains` entry — keyed by a role, `provider/model-id`, or `provider/*`; an empty chain clears the key. */
@@ -192,6 +192,8 @@ type StripState =
 			scope?: ModelRoleSelectionScope;
 			chips: StripChip[];
 			index: number;
+			/** Where to land when a scope or thinking strip closes. */
+			returnToRoles: boolean;
 			/** Thinking level selected when this strip opened. */
 			initialThinkingLevel?: ConfiguredThinkingLevel;
 	  }
