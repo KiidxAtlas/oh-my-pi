@@ -1088,13 +1088,15 @@ export class SelectorController {
 									? (this.ctx.settings.getProjectModelRole("default") ??
 										this.ctx.settings.getGlobalModelRole("default"))
 									: this.ctx.settings.getGlobalModelRole("default");
-							const currentDefaultModel = resolveModelRoleValue(
-								storedDefault,
+							const candidateModels =
 								this.ctx.session.scopedModels.length > 0
 									? this.ctx.session.scopedModels.map(scoped => scoped.model)
-									: this.ctx.session.getAvailableModels(),
-								{ settings: this.ctx.settings },
-							).model;
+									: this.ctx.session.getAvailableModels();
+							// With no stored selector the active default was auto-selected, so the
+							// live session model is what a thinking-only edit re-selects.
+							const currentDefaultModel =
+								resolveModelRoleValue(storedDefault, candidateModels, { settings: this.ctx.settings }).model ??
+								this.ctx.session.model;
 							const selectsNewDefaultModel =
 								!currentDefaultModel ||
 								currentDefaultModel.provider !== model.provider ||
@@ -1127,6 +1129,10 @@ export class SelectorController {
 									selector: selectorValue,
 									thinkingLevel: isAuto ? ThinkingLevel.Inherit : concreteThinking,
 									persist: targetScope === "global",
+									// Project storage must name the layer explicitly: otherwise a preset
+									// request makes `ModelControls` default the scope to `project` and the
+									// Global chip would write `.omp/config.yml` instead of the global config.
+									scope: configuredStorage === "project" ? targetScope : undefined,
 									modelRolePreset: presetSelection,
 								});
 								if (!switched) return false;

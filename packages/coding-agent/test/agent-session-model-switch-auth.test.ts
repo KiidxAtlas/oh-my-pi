@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, spyOn } from "bun:test";
-import { mkdirSync } from "node:fs";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import { type Api, Effort, type Model } from "@oh-my-pi/pi-ai";
@@ -388,8 +388,8 @@ describe("AgentSession model switch auth pre-flight", () => {
 		const root = path.join(sharedDir.path(), "project-presets");
 		const cwd = path.join(root, "project");
 		const otherCwd = path.join(root, "other");
-		mkdirSync(cwd, { recursive: true });
-		mkdirSync(otherCwd, { recursive: true });
+		fs.mkdirSync(cwd, { recursive: true });
+		fs.mkdirSync(otherCwd, { recursive: true });
 		const settings = await Settings.loadIsolated({
 			cwd,
 			agentDir: path.join(root, "agent"),
@@ -439,8 +439,8 @@ describe("AgentSession model switch auth pre-flight", () => {
 		const root = path.join(sharedDir.path(), "runtime-presets");
 		const cwd = path.join(root, "project");
 		const otherCwd = path.join(root, "other");
-		mkdirSync(cwd, { recursive: true });
-		mkdirSync(otherCwd, { recursive: true });
+		fs.mkdirSync(cwd, { recursive: true });
+		fs.mkdirSync(otherCwd, { recursive: true });
 		const settings = await Settings.loadIsolated({
 			cwd,
 			agentDir: path.join(root, "agent"),
@@ -489,7 +489,7 @@ describe("AgentSession model switch auth pre-flight", () => {
 		const selected = `${to.provider}/${to.id}`;
 		const root = path.join(sharedDir.path(), "overlay-presets");
 		const cwd = path.join(root, "project");
-		mkdirSync(cwd, { recursive: true });
+		fs.mkdirSync(cwd, { recursive: true });
 		const overlayPath = path.join(root, "overlay.yml");
 		await Bun.write(overlayPath, `modelRoles:\n  default: ${original}\n  smol: ${original}:high\n`);
 		const settings = await Settings.loadIsolated({

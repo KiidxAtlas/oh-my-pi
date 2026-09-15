@@ -1087,6 +1087,155 @@ describe("selector setting side effects", () => {
 			hub.dispose();
 		}
 	});
+	it("skips preset auto-load when re-selecting an auto-selected default with no stored selector", async () => {
+		const testTheme = await getThemeByName("dark");
+		if (!testTheme) throw new Error("Failed to load dark theme for model selector test");
+		setThemeInstance(testTheme);
+
+		const model = getBundledModel("openai", "gpt-5.5");
+		if (!model) throw new Error("Expected bundled OpenAI model for selector test");
+
+		// No `modelRoles.default`: the live model was auto-selected, so assigning it
+		// explicitly is not a model change and must not reload the preset.
+		const settings = Settings.isolated({});
+		const setModel = vi.fn(async (_model: unknown, _role: string, _options: { modelRolePreset?: unknown }) => ({
+			switched: true,
+		}));
+		const assignmentApplied = Promise.withResolvers<void>();
+		const showStatus = vi.fn((message: string) => {
+			if (message.startsWith("Default model:")) assignmentApplied.resolve();
+		});
+		let captured: unknown;
+		const controller = new SelectorController({
+			ui: {
+				requestRender: vi.fn(),
+				setFocus: vi.fn(),
+				showOverlay: vi.fn((component: unknown) => {
+					captured = component;
+					return { hide: vi.fn() };
+				}),
+				terminal: { rows: 40 },
+			},
+			editorContainer: { clear: vi.fn(), addChild: vi.fn(), children: [] },
+			editor: {},
+			settings,
+			session: {
+				model,
+				modelRegistry: {
+					getAll: () => [model],
+					getAvailable: () => [model],
+					getError: () => undefined,
+					refresh: async () => {},
+					refreshProvider: async () => {},
+					getDiscoverableProviders: () => [],
+					getProviderDiscoveryState: () => undefined,
+					authStorage: { hasAuth: () => false },
+				},
+				scopedModels: [{ model }],
+				getContextUsage: () => undefined,
+				setModel,
+				setThinkingLevel: vi.fn(),
+				applyModelRolePreset: vi.fn(),
+			},
+			statusLine: { invalidate: vi.fn() },
+			updateEditorBorderColor: vi.fn(),
+			keybindings: { getKeys: () => [], getDisplayString: () => "" },
+			showStatus,
+			showError: vi.fn(),
+		} as unknown as InteractiveModeContext);
+
+		controller.showModelSelector();
+		const hub = captured as { handleInput(data: string): void; dispose(): void } | undefined;
+		if (!hub) throw new Error("Expected model hub overlay to be shown");
+		try {
+			hub.handleInput("\n"); // Open the active model's role strip.
+			hub.handleInput("\n"); // Assign DEFAULT.
+			await assignmentApplied.promise;
+
+			expect(setModel.mock.calls[0]?.[2]).toMatchObject({ modelRolePreset: undefined });
+		} finally {
+			hub.dispose();
+		}
+	});
+
+	it("names the global layer when a project-storage session assigns the global default", async () => {
+		const testTheme = await getThemeByName("dark");
+		if (!testTheme) throw new Error("Failed to load dark theme for model selector test");
+		setThemeInstance(testTheme);
+
+		const currentModel = getBundledModel("openai", "gpt-5.5");
+		const targetModel = getBundledModel("openai", "gpt-5.6");
+		if (!currentModel || !targetModel) throw new Error("Expected bundled OpenAI models for selector test");
+
+		// Project storage with nothing shadowing the global role: the Global chip must
+		// persist through the global layer, not `.omp/config.yml`.
+		const settings = Settings.isolated({ modelRoleStorage: "project" });
+		settings.setModelRole("default", `${currentModel.provider}/${currentModel.id}`);
+		const setModel = vi.fn(async () => ({ switched: true }));
+		const assignmentApplied = Promise.withResolvers<void>();
+		const showStatus = vi.fn((message: string) => {
+			if (message.startsWith("Global default model:")) assignmentApplied.resolve();
+		});
+		let captured: unknown;
+		const controller = new SelectorController({
+			ui: {
+				requestRender: vi.fn(),
+				setFocus: vi.fn(),
+				showOverlay: vi.fn((component: unknown) => {
+					captured = component;
+					return { hide: vi.fn() };
+				}),
+				terminal: { rows: 40 },
+			},
+			editorContainer: { clear: vi.fn(), addChild: vi.fn(), children: [] },
+			editor: {},
+			settings,
+			session: {
+				model: currentModel,
+				modelRegistry: {
+					getAll: () => [currentModel, targetModel],
+					getAvailable: () => [currentModel, targetModel],
+					getError: () => undefined,
+					refresh: async () => {},
+					refreshProvider: async () => {},
+					getDiscoverableProviders: () => [],
+					getProviderDiscoveryState: () => undefined,
+					authStorage: { hasAuth: () => false },
+				},
+				scopedModels: [{ model: currentModel }, { model: targetModel }],
+				getContextUsage: () => undefined,
+				setModel,
+				setThinkingLevel: vi.fn(),
+				applyModelRolePreset: vi.fn(),
+			},
+			statusLine: { invalidate: vi.fn() },
+			updateEditorBorderColor: vi.fn(),
+			keybindings: { getKeys: () => [], getDisplayString: () => "" },
+			showStatus,
+			showError: vi.fn(),
+		} as unknown as InteractiveModeContext);
+
+		controller.showModelSelector();
+		const hub = captured as { handleInput(data: string): void; dispose(): void } | undefined;
+		if (!hub) throw new Error("Expected model hub overlay to be shown");
+		try {
+			hub.handleInput("\t"); // Sidebar → model list.
+			hub.handleInput("\x1b[B"); // Active model → the other model.
+			hub.handleInput("\n"); // Open its role strip.
+			hub.handleInput("\x1b[B"); // "project default" chip → "global default" chip.
+			hub.handleInput("\n"); // Assign the global DEFAULT.
+			await assignmentApplied.promise;
+
+			expect(setModel).toHaveBeenCalledWith(
+				targetModel,
+				"default",
+				expect.objectContaining({ scope: "global", persist: true }),
+			);
+			expect(settings.getProjectModelRole("default")).toBeUndefined();
+		} finally {
+			hub.dispose();
+		}
+	});
 
 	it("replaces malformed default retry fallback chains from the model selector action", async () => {
 		const testTheme = await getThemeByName("dark");
