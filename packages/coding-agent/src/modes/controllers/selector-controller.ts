@@ -49,6 +49,7 @@ import {
 	setTheme,
 	theme,
 } from "../../modes/theme/theme";
+import { captureBrowserSession } from "../../utils/browser-session";
 import type { AgentHubOpenOptions, InteractiveModeContext } from "../../modes/types";
 import type { SessionOAuthAccountList } from "../../session/agent-session-types";
 import type { ResetCreditAccountStatus, ResetCreditRedeemOutcome } from "../../session/auth-storage";
@@ -228,10 +229,13 @@ export class SelectorController {
 	 * @param create Factory that receives a `done` callback and returns the component and focus target
 	 */
 	showSelector(create: (done: () => void) => { component: Component; focus: Component }): void {
+		const previousChildren = [...this.ctx.editorContainer.children];
+		const previousFocus = this.ctx.ui.getFocused();
 		const done = () => {
 			this.ctx.editorContainer.clear();
-			this.ctx.editorContainer.addChild(this.ctx.editor);
-			this.ctx.ui.setFocus(this.ctx.editor);
+			for (const child of previousChildren) this.ctx.editorContainer.addChild(child);
+			if (previousFocus) this.ctx.ui.setFocus(previousFocus);
+			else this.ctx.ui.setFocus(this.ctx.editor);
 		};
 		const { component, focus } = create(done);
 		this.ctx.editorContainer.clear();
@@ -580,9 +584,8 @@ export class SelectorController {
 		}
 
 		switch (id) {
-			// Session-managed settings (not in SettingsManager)
 			case "autoCompact":
-				this.ctx.session.setAutoCompactionEnabled(value as boolean);
+				this.ctx.session.setAutoCompactionEnabled(value as boolean, true);
 				this.ctx.statusLine.setAutoCompactEnabled(value as boolean);
 				break;
 			case "composer.shape":
@@ -2148,10 +2151,10 @@ export class SelectorController {
 		this.ctx.editorContainer.clear();
 		this.ctx.editorContainer.addChild(dialog);
 		this.ctx.ui.setFocus(dialog);
-		this.ctx.ui.requestRender();
 		try {
 			const identity = await this.ctx.session.modelRegistry.authStorage.login(providerId as OAuthProvider, {
 				signal: dialog.signal,
+				onBrowserSession: captureBrowserSession,
 				onAuth: (info: { url: string; launchUrl?: string; instructions?: string }) => {
 					// The dialog renders the full URL (SSH-safe copy target) and
 					// opens the browser best-effort.
