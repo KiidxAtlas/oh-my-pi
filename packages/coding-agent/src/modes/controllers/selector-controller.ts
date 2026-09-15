@@ -1062,7 +1062,7 @@ export class SelectorController {
 					const releaseDefaultMutation = role === "default" ? await this.#acquireDefaultRoleMutation() : undefined;
 					const configuredStorage = this.ctx.settings.get("modelRoleStorage");
 					const targetScope = configuredStorage === "project" ? (scope ?? "project") : "global";
-					const selectorValue = selector ?? `${model.provider}/${model.id}`;
+					const selectorValue = selector ?? formatModelStringWithRouting(model);
 					const scopeLabel =
 						configuredStorage === "project" ? `${targetScope === "project" ? "Project" : "Global"} ` : "";
 					const defaultStatusLabel = configuredStorage === "project" ? `${scopeLabel}default` : "Default";
@@ -1073,7 +1073,7 @@ export class SelectorController {
 							const isAuto = thinkingLevel === AUTO_THINKING;
 							const concreteThinking = isAuto || thinkingLevel === undefined ? undefined : thinkingLevel;
 							const { switched } = await this.ctx.session.setModel(model, role, {
-								selector,
+								selector: selectorValue,
 								thinkingLevel: isAuto ? ThinkingLevel.Inherit : concreteThinking,
 								persist: true,
 								scope: targetScope,
