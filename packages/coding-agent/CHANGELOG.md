@@ -4,8 +4,8 @@
 
 ### Added
 
-- Model role presets now save and restore the primary selector and global fallback chains, preserving routing, fallback order, and per-model reasoning levels.
-- Named model role presets can be renamed with `r` in `/models`, preserving their contents and Default selection.
+- Model role presets now save and restore the primary selector and global fallback chains, preserving routing, fallback order, and per-model reasoning levels. ([extension PR](https://github.com/KiidxAtlas/oh-my-pi/pull/1) by [@bobzhou-source](https://github.com/bobzhou-source))
+- Named model role presets can be renamed with `r` in `/models`, preserving their contents and Default selection. ([extension PR](https://github.com/KiidxAtlas/oh-my-pi/pull/1) by [@bobzhou-source](https://github.com/bobzhou-source))
 
 ## [18.2.1] - 2026-09-15
 
