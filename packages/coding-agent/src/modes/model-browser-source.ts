@@ -67,6 +67,8 @@ export function createModelBrowserSource(settings: Settings): ModelHubSource {
 		getGlobalModelRole: role => settings.getGlobalModelRole(role),
 		getModelRoleSource: role => settings.getModelRoleSource(role),
 		getModelRoleProvenance: role => settings.getModelRoleProvenance(role),
+		getModelRolePresetProvenance: (model, name) =>
+			settings.getModelRolePresetProvenance(`${model.provider}/${model.id}`, name),
 		getProjectModelRoles: () => ({ ...settings.getProjectModelRoles() }),
 		getGlobalModelRoles: () => ({ ...settings.getGlobalModelRoles() }),
 		getRoleInfo: role => getRoleInfo(role, settings),

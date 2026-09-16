@@ -277,6 +277,21 @@ describe("ModelHub", () => {
 			expect(normalize(hub.render(220))).not.toContain("(unsaved)");
 		});
 
+		test("does not mark a saved default dirty when global concrete thinking is captured as a suffix", () => {
+			const model = makeModel("test", "primary");
+			const selector = `${model.provider}/${model.id}`;
+			const settings = Settings.isolated();
+			settings.setModelRole("default", selector);
+			settings.set("defaultThinkingLevel", ThinkingLevel.High);
+			settings.set("modelRolePresets", {
+				[selector]: { default: { roles: { default: `${selector}:high` } } },
+			});
+			const { hub } = createHub({ models: [model], scoped: true, settings });
+
+			hub.handleInput(UP); // All models → Roles.
+			expect(normalize(hub.render(220))).not.toContain("(unsaved)");
+		});
+
 		test("disabling built-ins clears the stale Default comparison and reset selection", () => {
 			const model = makeModel("test", "primary");
 			const settings = Settings.isolated();

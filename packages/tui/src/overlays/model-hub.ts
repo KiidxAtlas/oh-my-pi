@@ -29,7 +29,12 @@ import type {
 	ModelRoleLookup,
 	ResolvedModelRoleValue,
 } from "./model-browser";
-import { AUTO_THINKING, type ConfiguredThinkingLevel, getConfiguredThinkingLevelMetadata } from "../thinking";
+import {
+	AUTO_THINKING,
+	type ConfiguredThinkingLevel,
+	getConfiguredThinkingLevelMetadata,
+	parseConfiguredThinkingLevel,
+} from "../thinking";
 import { thinkingLevelGlyph } from "../render/render-utils";
 import { theme } from "../theme/theme";
 import { matchesSelectCancel, matchesSelectDown, matchesSelectUp } from "../keybinding-matchers";
@@ -101,6 +106,7 @@ export interface ModelHubSource extends ModelBrowserSource {
 	getGlobalModelRole(role: string): string | undefined;
 	getModelRoleSource(role: string): "global" | "project" | "default";
 	getModelRoleProvenance(role: string): "runtime" | "overlay" | "project" | "global" | "default";
+	getModelRolePresetProvenance(model: Model, name?: string): "runtime" | "overlay" | "project" | "global" | "default";
 	getProjectModelRoles(): Record<string, string | undefined>;
 	getGlobalModelRoles(): Record<string, string | undefined>;
 	/** Format a model as a routing-aware selector (`provider/id[@upstream]`). */
@@ -853,16 +859,17 @@ export class ModelHubComponent implements Component {
 				globalProfile?.fallbackChains !== undefined &&
 				!Bun.deepEquals(this.#globalFallbackChains(), globalProfile.fallbackChains);
 			const storedDefault = storedRoles.default;
-			// The Auto chip stores a bare role plus the owned global thinking mode;
-			// snapshots encode the same choice with an explicit :auto selector.
-			const matchesCapturedAuto =
+			// A bare default role inherits the owned global thinking mode; snapshots
+			// capture that as an explicit suffix so later setting changes do not
+			// rewrite the profile. This covers auto and every concrete effort.
+			const configuredDefaultThinking = parseConfiguredThinkingLevel(this.#settings.globalDefaultThinkingLevel);
+			const matchesCapturedDefaultThinking =
 				storedDefault !== undefined &&
-				globalProfile?.roles.default === `${storedDefault}:auto` &&
-				this.#settings.globalDefaultThinkingLevel === "auto";
+				globalProfile?.roles.default === formatModelSelectorValue(storedDefault, configuredDefaultThinking);
 			const defaultDiffersFromPreset =
 				globalProfile?.roles.default !== undefined &&
 				storedDefault !== globalProfile.roles.default &&
-				!matchesCapturedAuto;
+				!matchesCapturedDefaultThinking;
 			this.#activePresetDirty =
 				this.#activePresetManuallyDirty ||
 				rolesDifferFromPreset ||
@@ -1264,14 +1271,12 @@ export class ModelHubComponent implements Component {
 	 * mutation that would silently change a shadowed global entry instead.
 	 */
 	#canMutatePreset(model: Model, name: string | undefined): boolean {
-		const selector = `${model.provider}/${model.id}`;
-		const presetSource = this.#settings.getModelRolePresetProvenance(selector, name);
+		const presetSource = this.#settings.getModelRolePresetProvenance(model, name);
 		if (name === undefined ? presetSource !== "global" && presetSource !== "default" : presetSource !== "global") {
 			return false;
 		}
-		const stored = this.#settings.get("modelRolePresets");
-		if (getModelRolePresetDefaultName(stored, model) !== name) return true;
-		const defaultSource = this.#settings.getModelRolePresetProvenance(selector);
+		if (this.#settings.presetDefaultName(model) !== name) return true;
+		const defaultSource = this.#settings.getModelRolePresetProvenance(model);
 		return defaultSource === "global" || defaultSource === "default";
 	}
 
