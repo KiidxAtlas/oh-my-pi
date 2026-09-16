@@ -1112,16 +1112,18 @@ export class SelectorController {
 				resolved.model.id === model.id;
 			if (!isOwner) {
 				delete result.default;
-			} else if (
-				!resolved.explicitThinkingLevel &&
-				parseConfiguredThinkingLevel(
+			} else if (!resolved.explicitThinkingLevel) {
+				// The stored selector carries no explicit effort. Capture the configured
+				// global thinking level — auto OR a concrete effort like `high` — so a
+				// later change to the global level cannot rewrite what this preset
+				// restores. A bare `inherit`/unset level leaves the selector untouched.
+				const configuredLevel = parseConfiguredThinkingLevel(
 					(this.ctx.settings.getGlobalSettings() as Record<string, unknown>)["defaultThinkingLevel"] as
 						| string
 						| null
 						| undefined,
-				) === AUTO_THINKING
-			) {
-				result.default = `${defaultEntry}:auto`;
+				);
+				result.default = formatModelSelectorValue(defaultEntry, configuredLevel);
 			}
 		}
 		return result;
@@ -1370,34 +1372,42 @@ export class SelectorController {
 							: this.ctx.session.configuredThinkingLevel();
 						const isAuto = configuredThinking === AUTO_THINKING;
 						const concreteThinking = concreteThinkingLevel(configuredThinking);
-						const { switched, defaultThinking } = await this.ctx.session.setModel(model, "default", {
-							selector: formatModelStringWithRouting(model),
-							thinkingLevel: isAuto ? ThinkingLevel.Inherit : (concreteThinking ?? ThinkingLevel.Inherit),
-							persist: true,
-							scope: this.ctx.settings.get("modelRoleStorage"),
-							modelRolePreset: applyOptions?.useBuiltInDefault
-								? {
-										kind: "built-in-default",
-										replaceUnsetRoles: applyOptions.replaceUnsetRoles,
-									}
-								: name === undefined
+						const { switched, effectiveModel, defaultThinking } = await this.ctx.session.setModel(
+							model,
+							"default",
+							{
+								selector: formatModelStringWithRouting(model),
+								thinkingLevel: isAuto ? ThinkingLevel.Inherit : (concreteThinking ?? ThinkingLevel.Inherit),
+								persist: true,
+								scope: this.ctx.settings.get("modelRoleStorage"),
+								modelRolePreset: applyOptions?.useBuiltInDefault
 									? {
-											kind: "configured-default",
-											replaceUnsetRoles: applyOptions?.replaceUnsetRoles,
+											kind: "built-in-default",
+											replaceUnsetRoles: applyOptions.replaceUnsetRoles,
 										}
-									: {
-											kind: "named",
-											name,
-											replaceUnsetRoles: applyOptions?.replaceUnsetRoles,
-										},
-						});
+									: name === undefined
+										? {
+												kind: "configured-default",
+												replaceUnsetRoles: applyOptions?.replaceUnsetRoles,
+											}
+										: {
+												kind: "named",
+												name,
+												replaceUnsetRoles: applyOptions?.replaceUnsetRoles,
+											},
+							},
+						);
 						const liveModel = this.ctx.session.model;
+						// Under an authoritative overlay `setModel` persists the preset but
+						// reports `switched: false`; treat it as applied when the live model
+						// already matches the preset's effective (routed) default, not the
+						// clicked selector, so a route-only preset default is still activated.
 						const applied =
 							switched ||
 							(liveModel !== undefined &&
-								liveModel.provider === model.provider &&
-								liveModel.id === model.id &&
-								formatModelStringWithRouting(liveModel) === formatModelStringWithRouting(model));
+								liveModel.provider === effectiveModel.provider &&
+								liveModel.id === effectiveModel.id &&
+								formatModelStringWithRouting(liveModel) === formatModelStringWithRouting(effectiveModel));
 						if (!applied) return false;
 						// The preset's captured default effort (applied session-side by
 						// `setModel`) must not be overwritten by the pre-switch level.
@@ -1477,7 +1487,11 @@ export class SelectorController {
 				},
 				onFallbackChainChange: (role, chain) => {
 					try {
-						const chains = { ...this.ctx.settings.get("retry.fallbackChains") };
+						// `set` writes the global layer, and preset auto-save snapshots that
+						// same layer. Base the edit on the global chains only — spreading the
+						// effective merged map would copy project/overlay-only chains into
+						// global and then into the saved preset, breaking preset isolation.
+						const chains = { ...this.ctx.settings.getGlobalRetryFallbackChains() };
 						if (chain.length === 0) {
 							delete chains[role];
 						} else {

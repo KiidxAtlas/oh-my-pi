@@ -366,6 +366,57 @@ describe("ModelHub", () => {
 
 			expect(normalize(hub.render(220))).not.toContain("(unsaved)");
 		});
+		test("keeps a preset active when its default routes to a different upstream", async () => {
+			const base = getBundledModel("openrouter", "z-ai/glm-4.7");
+			if (!base) throw new Error("Expected bundled OpenRouter model for routed preset test");
+			const fireworks = {
+				...base,
+				compat: { ...base.compat, openRouterRouting: { only: ["fireworks"] } },
+			} as Model;
+			const deepinfra = {
+				...base,
+				compat: { ...base.compat, openRouterRouting: { only: ["deepinfra"] } },
+			} as Model;
+			const selector = `${base.provider}/${base.id}`;
+			const fireworksSelector = `${selector}@fireworks`;
+			const deepinfraSelector = `${selector}@deepinfra`;
+			// The clicked default routes to fireworks, but the saved "quality" preset's
+			// captured default routes to deepinfra.
+			const settings = Settings.isolated({
+				modelRoles: { default: fireworksSelector, smol: fireworksSelector },
+				modelRolePresets: {
+					applyOnSelect: true,
+					[selector]: {
+						presets: { quality: { roles: { default: deepinfraSelector, smol: deepinfraSelector } } },
+					},
+				},
+			});
+			const { hub } = createHub({
+				models: [fireworks, deepinfra],
+				scoped: true,
+				settings,
+				// Simulate the controller persisting the preset's effective routed default.
+				callbacks: {
+					onApplyPreset: () => {
+						settings.setModelRole("default", deepinfraSelector);
+						settings.setModelRole("smol", deepinfraSelector);
+						return true;
+					},
+				},
+			});
+
+			hub.handleInput(UP); // All models → Roles.
+			hub.handleInput("\n"); // Enter role rows.
+			hub.handleInput(UP); // Save preset.
+			hub.handleInput(UP); // Named quality preset.
+			hub.handleInput("\n"); // Apply it.
+			await Promise.resolve();
+
+			// The applied preset routes the default to a different upstream than the
+			// clicked selector; it must stay active (not cleared by the route-aware
+			// rebuild) so a later save/auto-save still targets it.
+			expect(normalize(hub.render(220))).toContain("(active)");
+		});
 
 		test("keeps the Default row separate from a named default pointer", async () => {
 			const model = makeModel("test", "primary");

@@ -947,20 +947,30 @@ describe("resolveModelRoleValue", () => {
 		},
 	);
 
-	test("cyclic aliases fall back to the built-in role priority chain", () => {
+	test("cyclic aliases fall back to the revisited role's own priority chain", () => {
+		// Baselines: what @smol and @slow resolve to with no misconfiguration.
+		const defaults = Settings.isolated();
+		const smolBaseline = resolveModelRoleValue("@smol", allModels, { settings: defaults }).model;
+		const slowBaseline = resolveModelRoleValue("@slow", allModels, { settings: defaults }).model;
+		expect(smolBaseline).toBeDefined();
+		expect(slowBaseline).toBeDefined();
+		// smol (fast) and slow (comprehensive) must pick different classes, or the
+		// test cannot prove the cycle preserves each role's intended class.
+		expect(smolBaseline).not.toBe(slowBaseline);
+
 		const settings = Settings.isolated({
 			modelRoles: { smol: "@slow", slow: "@smol" },
 		});
 
-		// A misconfigured cycle must not leave the role with no model; it resolves
-		// through the built-in priority chain instead of dropping every candidate.
-		const result = resolveModelRoleValue("@smol", allModels, { settings });
-		expect(result.model).toBeDefined();
-		expect(allModels.some(model => model === result.model)).toBe(true);
+		// A misconfigured cycle must not leave the role with no model, and must
+		// resolve through the *requested* role's built-in chain rather than the
+		// innermost recursion frame's — otherwise @smol and @slow swap classes.
+		expect(resolveModelRoleValue("@smol", allModels, { settings }).model).toBe(smolBaseline);
+		expect(resolveModelRoleValue("@slow", allModels, { settings }).model).toBe(slowBaseline);
 
 		// An outer thinking level applied to the alias survives the fallback.
 		const withEffort = resolveModelRoleValue("@smol:high", allModels, { settings });
-		expect(withEffort.model).toBeDefined();
+		expect(withEffort.model).toBe(smolBaseline);
 		expect(withEffort.thinkingLevel).toBe(Effort.High);
 	});
 

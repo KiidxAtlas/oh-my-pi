@@ -2026,7 +2026,10 @@ export class ModelHubComponent implements Component {
 				this.#refreshAfterMutation();
 				const current = this.#roles.default?.model;
 				if (current?.provider !== model.provider || current.id !== model.id) return;
-				this.#activePreset = { model, name, useBuiltInDefault };
+				// Record the live routed default (`current`), not the clicked selector:
+				// a preset whose `default` routes to a different @upstream would otherwise
+				// be cleared by the route-aware rebuild in #buildRolesRows.
+				this.#activePreset = { model: current, name, useBuiltInDefault };
 				this.#activePresetManuallyDirty = false;
 				this.#refreshAfterMutation();
 			},

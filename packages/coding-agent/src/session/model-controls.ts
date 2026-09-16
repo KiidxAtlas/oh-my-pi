@@ -251,6 +251,8 @@ export class ModelControls {
 		options?: SetModelOptions,
 	): Promise<{
 		switched: boolean;
+		/** The routed model actually applied (preset `default` route/effort included). */
+		effectiveModel: Model;
 		defaultRoleValue?: string;
 		defaultThinking?: ConfiguredThinkingLevel;
 	}> {
@@ -310,7 +312,7 @@ export class ModelControls {
 			// the live switch uses the resolved (routed) primary.
 			this.applyModelRolePreset(targetModel, presetSelection, scope);
 		}
-		if (shadowed) return { switched: false };
+		if (shadowed) return { switched: false, effectiveModel };
 		this.#host.settings.getStorage()?.recordModelUsage(`${effectiveModel.provider}/${effectiveModel.id}`);
 
 		// Re-apply thinking for the newly selected model. A preset's captured
@@ -326,6 +328,7 @@ export class ModelControls {
 		await this.#host.syncAfterModelChange(previousEditMode);
 		return {
 			switched: true,
+			effectiveModel,
 			defaultRoleValue: presetDefault?.value,
 			defaultThinking: presetDefault?.thinking,
 		};

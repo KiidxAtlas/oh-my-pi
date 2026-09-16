@@ -1106,12 +1106,15 @@ function resolveNestedRolePatterns(
 		}
 		if (visited.has(aliasRole)) {
 			// A configured cycle (e.g. smol = "@slow", slow = "@smol") loops back to a
-			// role already being resolved: substitute the built-in priority chain so
-			// the alias still yields a model instead of collapsing to nothing.
+			// role already being resolved: substitute the revisited role's own built-in
+			// priority chain so the alias still yields a model of the intended class,
+			// rather than the current recursion frame's chain (which would swap the
+			// roles' model classes) or collapsing to nothing.
+			const revisitDefaults = isModelRole(aliasRole) ? rolePriorityDefaults(aliasRole) : roleDefaults;
 			resolved.push(
 				...(thinkingLevel
-					? roleDefaults.map(defaultPattern => `${defaultPattern}:${thinkingLevel}`)
-					: roleDefaults),
+					? revisitDefaults.map(defaultPattern => `${defaultPattern}:${thinkingLevel}`)
+					: revisitDefaults),
 			);
 			continue;
 		}

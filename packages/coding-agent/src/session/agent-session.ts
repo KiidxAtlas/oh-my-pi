@@ -8528,6 +8528,7 @@ export class AgentSession {
 		options?: SetModelOptions,
 	): Promise<{
 		switched: boolean;
+		effectiveModel: Model;
 		defaultRoleValue?: string;
 		defaultThinking?: ConfiguredThinkingLevel;
 	}> {

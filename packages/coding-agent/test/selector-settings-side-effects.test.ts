@@ -417,6 +417,77 @@ describe("selector setting side effects", () => {
 			hub.dispose();
 		}
 	});
+	it("captures a concrete global thinking level in a saved preset default", async () => {
+		const testTheme = await getThemeByName("dark");
+		if (!testTheme) throw new Error("Failed to load dark theme for model selector test");
+		setThemeInstance(testTheme);
+
+		const model = getBundledModel("openai", "gpt-5.5");
+		if (!model) throw new Error("Expected bundled model for preset capture test");
+		const selector = `${model.provider}/${model.id}`;
+		// Bare default selector (no explicit effort) + a concrete global level, both
+		// written to the global layer that presets capture.
+		const settings = Settings.isolated({});
+		settings.set("defaultThinkingLevel", ThinkingLevel.High);
+		settings.setModelRole("default", selector);
+		let captured: unknown;
+		const controller = new SelectorController({
+			ui: {
+				requestRender: vi.fn(),
+				setFocus: vi.fn(),
+				showOverlay: vi.fn((component: unknown) => {
+					captured = component;
+					return { hide: vi.fn() };
+				}),
+				terminal: { rows: 40 },
+			},
+			editorContainer: { clear: vi.fn(), addChild: vi.fn(), children: [] },
+			editor: {},
+			settings,
+			session: {
+				model,
+				modelRegistry: {
+					getAll: () => [model],
+					getAvailable: () => [model],
+					getError: () => undefined,
+					refresh: async () => {},
+					refreshProvider: async () => {},
+					getDiscoverableProviders: () => [],
+					getProviderDiscoveryState: () => undefined,
+					authStorage: { hasAuth: () => false },
+				},
+				scopedModels: [{ model }],
+				getContextUsage: () => undefined,
+			},
+			statusLine: { invalidate: vi.fn() },
+			updateEditorBorderColor: vi.fn(),
+			keybindings: { getKeys: () => [], getDisplayString: () => "" },
+			showStatus: vi.fn(),
+			showError: vi.fn(),
+		} as unknown as InteractiveModeContext);
+
+		controller.showModelSelector();
+		const hub = captured as
+			| { handleInput(data: string): void; render(width: number): string[]; dispose(): void }
+			| undefined;
+		if (!hub) throw new Error("Expected model hub overlay to be shown");
+		try {
+			hub.handleInput("\x1b[A"); // All models → Roles.
+			hub.handleInput("\n"); // Enter role rows (lands on DEFAULT).
+			hub.handleInput("\x1b[A"); // Up past the separator → Save preset row.
+			hub.handleInput("\n"); // Open the preset-name strip.
+			for (const ch of "quality") hub.handleInput(ch);
+			hub.handleInput("\n"); // Submit → onSavePreset.
+
+			const presets = settings.get("modelRolePresets") as Record<
+				string,
+				{ presets?: Record<string, { roles?: Record<string, string | undefined> }> }
+			>;
+			expect(presets[selector]?.presets?.quality?.roles?.default).toBe(`${selector}:high`);
+		} finally {
+			hub.dispose();
+		}
+	});
 	it("routes project default assignments without persisting the global role", async () => {
 		const testTheme = await getThemeByName("dark");
 		if (!testTheme) throw new Error("Failed to load dark theme for model selector test");
@@ -1091,7 +1162,7 @@ describe("selector setting side effects", () => {
 			modelRolePresets: { [selector]: { presets: { quality: { roles: { smol: selector } } } } },
 		});
 		settings.overrideModelRoles({ default: selector });
-		const setModel = vi.fn(async () => ({ switched: false }));
+		const setModel = vi.fn(async () => ({ switched: false, effectiveModel: model }));
 		const setThinkingLevel = vi.fn();
 		let captured: unknown;
 		const controller = new SelectorController({
@@ -1472,6 +1543,86 @@ describe("selector setting side effects", () => {
 			expect(showError).not.toHaveBeenCalled();
 			expect(settings.get("retry.fallbackChains")).toEqual({ default: ["test/retry-fallback-model"] });
 			expect(showStatus).toHaveBeenCalledWith("DEFAULT fallbacks: test/retry-fallback-model");
+		} finally {
+			hub.dispose();
+		}
+	});
+	it("keeps shadowed fallback chains out of the global layer when editing another chain", async () => {
+		const testTheme = await getThemeByName("dark");
+		if (!testTheme) throw new Error("Failed to load dark theme for model selector test");
+		setThemeInstance(testTheme);
+
+		const settings = Settings.isolated({});
+		// A config-overlay/runtime layer shadows the global fallback chains with a
+		// smol chain that global never owned.
+		settings.override("retry.fallbackChains", { smol: ["test/shadowed-model"] } as Record<string, string[]>);
+		const fallback = buildModel({
+			id: "retry-fallback-model",
+			name: "retry-fallback-model",
+			api: "ollama-chat",
+			baseUrl: "https://example.com",
+			reasoning: false,
+			provider: "test",
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128_000,
+			maxTokens: 1024,
+		});
+		const showStatus = vi.fn();
+		const showError = vi.fn();
+		let captured: unknown;
+		const controller = new SelectorController({
+			ui: {
+				requestRender: vi.fn(),
+				setFocus: vi.fn(),
+				showOverlay: vi.fn((component: unknown) => {
+					captured = component;
+					return { hide: vi.fn() };
+				}),
+				terminal: { rows: 40 },
+			},
+			editorContainer: { clear: vi.fn(), addChild: vi.fn(), children: [] },
+			editor: {},
+			settings,
+			session: {
+				model: undefined,
+				modelRegistry: {
+					getAll: () => [fallback],
+					getAvailable: () => [fallback],
+					getError: () => undefined,
+					refresh: async () => {},
+					refreshProvider: async () => {},
+					getDiscoverableProviders: () => [],
+					getProviderDiscoveryState: () => undefined,
+					authStorage: { hasAuth: () => false },
+				},
+				scopedModels: [{ model: fallback }],
+				getContextUsage: () => undefined,
+			},
+			statusLine: { invalidate: vi.fn() },
+			updateEditorBorderColor: vi.fn(),
+			keybindings: { getKeys: () => [], getDisplayString: () => "" },
+			showStatus,
+			showError,
+		} as unknown as InteractiveModeContext);
+
+		controller.showModelSelector();
+		const hub = captured as
+			| { handleInput(data: string): void; render(width: number): string[]; dispose(): void }
+			| undefined;
+		if (!hub) throw new Error("Expected model hub overlay to be shown");
+		try {
+			hub.handleInput("\n");
+			const frame = stripVTControlCharacters(hub.render(220).join("\n"));
+			expect(frame).toContain("retry-fallback");
+			hub.handleInput("\x1b[D");
+			hub.handleInput("\n");
+			await Promise.resolve();
+
+			expect(showError).not.toHaveBeenCalled();
+			// Editing the default chain must not copy the shadowed project/overlay
+			// smol chain into the global layer (which presets snapshot verbatim).
+			expect(settings.getGlobalRetryFallbackChains()).toEqual({ default: ["test/retry-fallback-model"] });
 		} finally {
 			hub.dispose();
 		}
