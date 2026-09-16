@@ -148,6 +148,7 @@ function createHub(options: {
 			onSavePreset: options.callbacks?.onSavePreset,
 			onSetDefaultPreset: options.callbacks?.onSetDefaultPreset,
 			onSaveActivePreset: options.callbacks?.onSaveActivePreset,
+			onRenamePreset: options.callbacks?.onRenamePreset,
 			onDeletePreset: options.callbacks?.onDeletePreset,
 		},
 		options.hub,
@@ -239,9 +240,12 @@ describe("ModelHub", () => {
 
 		test("allows saving the active Default without applying built-in roles", () => {
 			const model = makeModel("test", "primary");
-			const settings = Settings.isolated({
-				modelRoles: { default: "test/primary", smol: "test/existing" },
-				modelRolePresets: { applyOnSelect: false, "test/primary": { presets: {}, default: { roles: {} } } },
+			const settings = Settings.isolated();
+			settings.setModelRole("default", "test/primary");
+			settings.setModelRole("smol", "test/existing");
+			settings.set("modelRolePresets", {
+				applyOnSelect: false,
+				"test/primary": { presets: {}, default: { roles: {} } },
 			});
 			const onSaveActivePreset = vi.fn();
 			const onApplyPreset = vi.fn();
@@ -322,6 +326,53 @@ describe("ModelHub", () => {
 				replaceUnsetRoles: false,
 				useBuiltInDefault: false,
 			});
+		});
+
+		test("leaves a higher-precedence preset read-only instead of mutating a shadowed global copy", async () => {
+			const model = makeModel("test", "primary");
+			const selector = `${model.provider}/${model.id}`;
+			const settings = Settings.isolated();
+			settings.setModelRole("default", selector);
+			settings.set("modelRolePresets", {
+				[selector]: { presets: { quality: { roles: { smol: "test/global" } } } },
+			});
+			settings.override("modelRolePresets", {
+				[selector]: { presets: { quality: { roles: { smol: "test/managed" } } } },
+			});
+			const onDeletePreset = vi.fn();
+			const onSetDefaultPreset = vi.fn();
+			const onRenamePreset = vi.fn();
+			const onSaveActivePreset = vi.fn();
+			const { hub } = createHub({
+				models: [model],
+				scoped: true,
+				settings,
+				callbacks: {
+					onApplyPreset: () => true,
+					onDeletePreset,
+					onSetDefaultPreset,
+					onRenamePreset,
+					onSaveActivePreset,
+				},
+			});
+
+			hub.handleInput(UP); // All models → Roles.
+			hub.handleInput("\n"); // Enter role rows.
+			hub.handleInput(UP); // Save preset.
+			hub.handleInput(UP); // Managed named preset.
+			expect(normalize(hub.render(220))).toContain("Preset: quality (managed by config)");
+			hub.handleInput("x");
+			hub.handleInput("d");
+			hub.handleInput("r");
+			expect(onDeletePreset).not.toHaveBeenCalled();
+			expect(onSetDefaultPreset).not.toHaveBeenCalled();
+			expect(onRenamePreset).not.toHaveBeenCalled();
+			expect(normalize(hub.render(220))).not.toContain("Rename preset:");
+
+			hub.handleInput("\n"); // Applying remains allowed.
+			await Promise.resolve();
+			hub.handleInput("s");
+			expect(onSaveActivePreset).not.toHaveBeenCalled();
 		});
 		test("resets a named preset when the default route changes", async () => {
 			const base = getBundledModel("openrouter", "z-ai/glm-4.7");

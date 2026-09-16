@@ -1251,10 +1251,28 @@ export class ModelHubComponent implements Component {
 			this.#activePresetManuallyDirty = false;
 			return;
 		}
+		if (!this.#canMutatePreset(active.model, active.name)) return;
 		this.#callbacks.onSaveActivePreset?.(active.model, active.name, automatic);
 		if (active.name === undefined) active.useBuiltInDefault = false;
 		this.#activePresetDirty = false;
 		this.#activePresetManuallyDirty = false;
+	}
+
+	/**
+	 * Preset edits persist only to the global layer. Merged project, overlay,
+	 * and runtime entries remain available to apply, but must not accept a
+	 * mutation that would silently change a shadowed global entry instead.
+	 */
+	#canMutatePreset(model: Model, name: string | undefined): boolean {
+		const selector = `${model.provider}/${model.id}`;
+		const presetSource = this.#settings.getModelRolePresetProvenance(selector, name);
+		if (name === undefined ? presetSource !== "global" && presetSource !== "default" : presetSource !== "global") {
+			return false;
+		}
+		const stored = this.#settings.get("modelRolePresets");
+		if (getModelRolePresetDefaultName(stored, model) !== name) return true;
+		const defaultSource = this.#settings.getModelRolePresetProvenance(selector);
+		return defaultSource === "global" || defaultSource === "default";
 	}
 
 	#thinkingOptionsFor(model: Model): ConfiguredThinkingLevel[] {
@@ -1773,6 +1791,10 @@ export class ModelHubComponent implements Component {
 		const name = strip.input.getValue().trim();
 		if (!this.#settings.isValidPresetName(name)) return;
 		if (strip.renameFrom !== undefined) {
+			if (!this.#canMutatePreset(strip.item.model, strip.renameFrom)) {
+				this.#closeStrip();
+				return;
+			}
 			// Mirror the helper's rejection exactly (any existing entry key, valid
 			// payload or not) so the active preset's identity never follows a
 			// no-op rename.
@@ -2148,7 +2170,9 @@ export class ModelHubComponent implements Component {
 					// Restored the active profile instead of deleting it.
 				} else if (this.#isActivePresetTarget(row)) {
 					this.#applyPreset(row.model, row.name);
-				} else if (row.name) this.#callbacks.onDeletePreset?.(row.model, row.name);
+				} else if (row.name && this.#canMutatePreset(row.model, row.name)) {
+					this.#callbacks.onDeletePreset?.(row.model, row.name);
+				}
 				this.#refreshAfterMutation();
 			} else if (row?.kind === "fallback") this.#removeFallback(row);
 			else if (row?.kind === "chainKey") this.#setFallbackChain(row.role, []);
@@ -2159,11 +2183,18 @@ export class ModelHubComponent implements Component {
 			return;
 		}
 		if (printable === "d" && row?.kind === "preset") {
-			this.#callbacks.onSetDefaultPreset?.(row.model, row.name);
+			if (this.#canMutatePreset(row.model, row.name)) {
+				this.#callbacks.onSetDefaultPreset?.(row.model, row.name);
+			}
 			this.#refreshAfterMutation();
 			return;
 		}
-		if (printable === "r" && row?.kind === "preset" && row.name !== undefined) {
+		if (
+			printable === "r" &&
+			row?.kind === "preset" &&
+			row.name !== undefined &&
+			this.#canMutatePreset(row.model, row.name)
+		) {
 			this.#strip = {
 				kind: "presetName",
 				item: {
@@ -2504,7 +2535,7 @@ export class ModelHubComponent implements Component {
 					this.#activePreset.name === rowDef.name;
 				const label =
 					rowDef.kind === "preset"
-						? `${rowDef.isDefault ? "★ " : "  "}Preset: ${rowDef.name ?? "Default"}${active ? " (active)" : ""}${active && this.#activePresetDirty ? " (unsaved)" : ""}`
+						? `${rowDef.isDefault ? "★ " : "  "}Preset: ${rowDef.name ?? "Default"}${active ? " (active)" : ""}${active && this.#activePresetDirty ? " (unsaved)" : ""}${this.#canMutatePreset(rowDef.model, rowDef.name) ? "" : " (managed by config)"}`
 						: "+ Save current roles as preset…";
 				let line = ` ${cursor} ${theme.fg(selected ? "accent" : "muted", label)}`;
 				line = this.#finishRolesRow(line, width, hovered);

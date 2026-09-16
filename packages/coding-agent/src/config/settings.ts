@@ -1378,6 +1378,31 @@ export class Settings {
 	}
 
 	/**
+	 * Report the highest-precedence layer that owns one saved model-role preset
+	 * entry, or a model's Default pointer when `name` is omitted. Preset maps
+	 * deep-merge, so ownership must be determined at the entry level rather
+	 * than from the merged `modelRolePresets` object as a whole.
+	 */
+	getModelRolePresetProvenance(
+		modelSelector: string,
+		name?: string,
+	): "runtime" | "overlay" | "project" | "global" | "default" {
+		const ownsPreset = (layer: RawSettings): boolean => {
+			const configured = layer.modelRolePresets;
+			if (!isRecord(configured)) return false;
+			const entry = configured[modelSelector];
+			if (!isRecord(entry)) return false;
+			if (name === undefined) return Object.hasOwn(entry, "default");
+			return isRecord(entry.presets) && Object.hasOwn(entry.presets, name);
+		};
+		if (ownsPreset(this.#overrides)) return "runtime";
+		if (ownsPreset(this.#configOverlay)) return "overlay";
+		if (ownsPreset(this.#projectSettingsForMerge())) return "project";
+		if (ownsPreset(this.#global)) return "global";
+		return "default";
+	}
+
+	/**
 	 * Get a model role from only the current project settings layer.
 	 */
 	getProjectModelRole(role: ModelRole | string): string | undefined {
